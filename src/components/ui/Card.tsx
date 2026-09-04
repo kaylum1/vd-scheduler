@@ -1,12 +1,15 @@
 import React from 'react';
 
-interface CardProps {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
-  className?: string;
 }
 
-export function Card({ children, className }: CardProps) {
-  return <div className={`card${className ? ` ${className}` : ''}`}>{children}</div>;
+export function Card({ children, className, ...rest }: CardProps) {
+  return (
+    <div className={`card${className ? ` ${className}` : ''}`} {...rest}>
+      {children}
+    </div>
+  );
 }
 
 export function CardHeader({
