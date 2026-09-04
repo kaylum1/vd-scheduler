@@ -1,0 +1,502 @@
+/* ---------- Week navigator ---------- */
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-panel);
+  border: 1.5px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+}
+
+.week-nav__arrow {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.week-nav__arrow:hover:not(:disabled) {
+  background: var(--bg-panel-muted);
+}
+
+.week-nav__arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.week-nav__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 158px;
+  gap: 1px;
+}
+
+.week-nav__top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.week-nav__relation {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.week-nav__range {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.week-nav__today-btn {
+  flex-shrink: 0;
+}
+
+/* This week: strongest identity */
+.week-nav--current {
+  border-color: var(--blue-600);
+  background: var(--blue-50);
+}
+.week-nav--current .week-nav__relation {
+  color: var(--blue-700);
+  font-size: 13.5px;
+}
+.week-nav--current .week-nav__range {
+  color: var(--blue-700);
+  opacity: 0.75;
+}
+
+/* Next week: clear but secondary */
+.week-nav--next {
+  border-color: #9fd6c4;
+  background: #f0faf6;
+}
+.week-nav--next .week-nav__relation {
+  color: #0d7a52;
+}
+
+/* Archive / past weeks: muted */
+.week-nav--archive {
+  background: var(--bg-panel-muted);
+  border-style: dashed;
+}
+.week-nav--archive .week-nav__relation,
+.week-nav--archive .week-nav__range {
+  color: var(--text-tertiary);
+}
+
+/* Future weeks beyond next: neutral */
+.week-nav--future .week-nav__relation {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 560px) {
+  .week-nav {
+    flex: 1;
+  }
+  .week-nav__center {
+    min-width: 0;
+    flex: 1;
+  }
+}
+
+/* ---------- Resort week section ---------- */
+.resort-section {
+  margin-bottom: 20px;
+}
+
+.resort-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.resort-section__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.resort-section__title h2 {
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.resort-section__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.resort-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* Distinct resort accent colours (visual grouping only, not semantic) */
+.resort-dot--crans-montana {
+  background: #2563eb;
+}
+.resort-dot--zermatt {
+  background: #0d9488;
+}
+.resort-dot--verbier {
+  background: #9333ea;
+}
+
+.resort-section__collapse-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resort-section__collapse-btn:hover {
+  background: var(--bg-panel-muted);
+  color: var(--text-secondary);
+}
+
+/* ---------- Manager rota: aligned Mon–Sun grid (desktop) ---------- */
+.rota-grid-wrap {
+  display: block;
+}
+
+.rota-grid-mobile {
+  display: none;
+}
+
+.rota-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  padding: 16px 18px 18px;
+}
+
+.rota-grid__day-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 2px 6px;
+  border-bottom: 2px solid var(--border-default);
+}
+
+.rota-grid__day-header.is-today {
+  border-bottom-color: var(--blue-600);
+}
+
+.rota-grid__weekday {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.rota-grid__day-header.is-today .rota-grid__weekday {
+  color: var(--blue-600);
+}
+
+.rota-grid__date {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.rota-grid__cell {
+  display: flex;
+  min-width: 0;
+}
+
+.rota-grid__cell .shift-card {
+  width: 100%;
+}
+
+.shift-cell-empty {
+  width: 100%;
+  min-height: 46px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--bg-panel-muted),
+    var(--bg-panel-muted) 6px,
+    var(--bg-panel) 6px,
+    var(--bg-panel) 12px
+  );
+  opacity: 0.6;
+}
+
+.premium-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber-600);
+  flex-shrink: 0;
+}
+
+/* ---------- Week grid (mobile day-scroll content) ---------- */
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 18px 18px;
+}
+
+.day-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.day-column__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 2px 6px;
+  border-bottom: 2px solid var(--border-default);
+}
+
+.day-column.is-today .day-column__header {
+  border-bottom-color: var(--blue-600);
+}
+
+.day-column__weekday {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.day-column.is-today .day-column__weekday {
+  color: var(--blue-600);
+}
+
+.day-column__date {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.day-column__shifts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 64px;
+}
+
+.day-column__empty {
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 10px 8px;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+/* ---------- Shift card ---------- */
+.shift-card {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  padding: 10px 10px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.shift-card--premium {
+  border-color: #f2d9a6;
+  background: linear-gradient(180deg, #fffdf8 0%, #fff 60%);
+}
+
+.shift-card--dense {
+  padding: 7px 8px 6px;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.shift-card--dense:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-panel);
+}
+
+.shift-card--dense .shift-card__name {
+  font-size: 11.5px;
+}
+
+.shift-card--dense .shift-card__time {
+  font-size: 10.5px;
+}
+
+.shift-card--dense .status-pill {
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+.shift-card--dense .shift-card__driver {
+  font-size: 10.5px;
+}
+
+.shift-card--dense .avatar--sm {
+  width: 18px;
+  height: 18px;
+  font-size: 8px;
+}
+
+.shift-card--no-coverage {
+  border-style: dashed;
+  border-color: #f3b9b9;
+  background: var(--red-50);
+}
+
+.shift-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.shift-card__name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.shift-card__name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.shift-card__time {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.shift-card__drivers {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.shift-card__driver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shift-card__driver {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.shift-card__no-drivers {
+  font-size: 11.5px;
+  color: var(--red-600);
+  font-weight: 600;
+}
+
+.shift-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-default);
+}
+
+.shift-card__manage-btn {
+  border: none;
+  background: transparent;
+  color: var(--blue-600);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.shift-card__manage-btn:hover {
+  text-decoration: underline;
+}
+
+/* ---------- Mobile: horizontal scroll-snap week ---------- */
+.week-day-nav {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .rota-grid-wrap {
+    display: none;
+  }
+
+  .rota-grid-mobile {
+    display: block;
+  }
+
+  .week-grid {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding: 14px 14px 18px;
+    gap: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .day-column {
+    flex: 0 0 78vw;
+    max-width: 320px;
+    scroll-snap-align: start;
+    background: var(--bg-panel-muted);
+    border-radius: var(--radius-md);
+    padding: 10px;
+    border: 1px solid var(--border-default);
+  }
+
+  .week-day-nav {
+    display: flex;
+    gap: 6px;
+    padding: 0 14px 10px;
+    overflow-x: auto;
+  }
+
+  .week-day-nav__btn {
+    flex-shrink: 0;
+    border: 1px solid var(--border-default);
+    background: var(--bg-panel);
+    border-radius: 999px;
+    padding: 5px 11px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .week-day-nav__btn.is-today {
+    border-color: var(--blue-600);
+    color: var(--blue-600);
+  }
+}

@@ -1,0 +1,348 @@
+/* ---------- Card ---------- */
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+}
+
+.card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.card__header h2,
+.card__header h3 {
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+
+.card__body {
+  padding: 18px;
+}
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.btn--primary {
+  background: var(--blue-600);
+  color: #fff;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--blue-700);
+}
+
+.btn--secondary {
+  background: var(--bg-panel);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--bg-panel-muted);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--bg-panel-muted);
+  color: var(--text-primary);
+}
+
+.btn--danger-outline {
+  background: var(--red-50);
+  border-color: transparent;
+  color: var(--red-600);
+}
+
+.btn--sm {
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.btn--icon {
+  padding: 8px;
+  width: 34px;
+  height: 34px;
+}
+
+.btn--block {
+  width: 100%;
+}
+
+/* ---------- Status pill ---------- */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.status-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-pill--green {
+  background: var(--green-50);
+  color: var(--green-600);
+}
+.status-pill--green .status-pill__dot {
+  background: var(--green-600);
+}
+
+.status-pill--amber {
+  background: var(--amber-50);
+  color: var(--amber-600);
+}
+.status-pill--amber .status-pill__dot {
+  background: var(--amber-600);
+}
+
+.status-pill--red {
+  background: var(--red-50);
+  color: var(--red-600);
+}
+.status-pill--red .status-pill__dot {
+  background: var(--red-600);
+}
+
+.status-pill--grey {
+  background: var(--grey-50);
+  color: var(--grey-600);
+}
+.status-pill--grey .status-pill__dot {
+  background: var(--grey-600);
+}
+
+.status-pill--blue {
+  background: var(--blue-50);
+  color: var(--blue-600);
+}
+.status-pill--blue .status-pill__dot {
+  background: var(--blue-600);
+}
+
+/* ---------- Badge ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--grey-50);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+}
+
+.badge--amber {
+  background: #fdf3e1;
+  color: var(--amber-600);
+  border-color: transparent;
+}
+
+.badge--blue {
+  background: var(--blue-50);
+  color: var(--blue-700);
+  border-color: transparent;
+}
+
+.badge--green {
+  background: var(--green-50);
+  color: var(--green-600);
+  border-color: transparent;
+}
+
+.badge--grey {
+  background: var(--grey-50);
+  color: var(--grey-600);
+  border-color: transparent;
+}
+
+/* ---------- Avatar ---------- */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--blue-50);
+  color: var(--blue-700);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.avatar--sm {
+  width: 22px;
+  height: 22px;
+  font-size: 9.5px;
+}
+
+.avatar--md {
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
+}
+
+.avatar-stack {
+  display: flex;
+  align-items: center;
+}
+
+.avatar-stack .avatar {
+  border: 2px solid var(--bg-panel);
+  margin-left: -8px;
+}
+
+.avatar-stack .avatar:first-child {
+  margin-left: 0;
+}
+
+/* ---------- Empty state ---------- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 36px 20px;
+  color: var(--text-tertiary);
+  gap: 6px;
+}
+
+.empty-state__icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-panel-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  color: var(--text-tertiary);
+}
+
+.empty-state__title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.empty-state__hint {
+  font-size: 12.5px;
+  max-width: 320px;
+}
+
+/* ---------- Role switcher (top bar demo control) ---------- */
+.role-switcher {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.role-switcher__tabs {
+  display: flex;
+  background: var(--bg-panel-muted);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+
+.role-switcher__tab {
+  border: none;
+  background: transparent;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.role-switcher__tab.is-active {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-panel);
+}
+
+.role-switcher select {
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+}
+
+.user-chip__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.user-chip__role {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 720px) {
+  .role-switcher select {
+    display: none;
+  }
+
+  .user-chip__name,
+  .user-chip__role {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .role-switcher__tab {
+    padding: 6px 9px;
+  }
+}
