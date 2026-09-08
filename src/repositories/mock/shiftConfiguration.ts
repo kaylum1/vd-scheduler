@@ -27,7 +27,10 @@ import { generateMockShiftInstancesForWeek } from './shiftInstances';
  * mode has no real equivalent for.
  */
 function notSupportedInMockMode(operation: string): never {
-  throw new RepositoryError(`${operation} is not supported in mock mode — use VITE_DATA_PROVIDER=supabase.`, { operation });
+  throw new RepositoryError(`${operation} is not supported in mock mode — use VITE_DATA_PROVIDER=supabase.`, {
+    operation,
+    code: 'mock_unsupported',
+  });
 }
 
 export class MockShiftConfigurationRepository implements ShiftConfigurationRepository {
@@ -105,7 +108,25 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
     deliveryRateChf: number;
     isPremium: boolean;
     effectiveFrom: string;
+    effectiveTo?: string;
   }): Promise<ShiftTemplateRecord> {
+    // Mirrors shift_templates_no_overlap (migration 05, a GIST exclusion
+    // constraint): no two *active* versions of the same shift type + weekday
+    // may have overlapping effective-date ranges.
+    const newFrom = input.effectiveFrom;
+    const newTo = input.effectiveTo ?? '9999-12-31';
+    const overlap = mockShiftTemplates.some((t) => {
+      if (t.shiftTypeId !== input.shiftTypeId || t.weekday !== input.weekday || !t.isActive) return false;
+      const existingTo = t.effectiveTo ?? '9999-12-31';
+      return t.effectiveFrom <= newTo && existingTo >= newFrom;
+    });
+    if (overlap) {
+      throw new RepositoryError('a schedule already covers this weekday for these dates', {
+        operation: 'shiftConfiguration.createShiftTemplateVersion',
+        code: '23P01',
+      });
+    }
+
     const record: ShiftTemplateRecord = {
       id: nextMockShiftTemplateId(),
       resortId: input.resortId,
@@ -118,7 +139,7 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
       deliveryRateChf: input.deliveryRateChf,
       isPremium: input.isPremium,
       effectiveFrom: input.effectiveFrom,
-      effectiveTo: null,
+      effectiveTo: input.effectiveTo ?? null,
       isActive: true,
     };
     mockShiftTemplates.push(record);

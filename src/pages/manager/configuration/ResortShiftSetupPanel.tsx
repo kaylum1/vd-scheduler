@@ -7,10 +7,11 @@ import { StatusPill } from '../../../components/ui/StatusPill';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { InlineNotice } from '../../../components/ui/InlineNotice';
 import { Modal, ConfirmDialog } from '../../../components/ui/Modal';
-import { IconCalendar, IconEdit, IconPlus } from '../../../components/ui/icons';
+import { IconEdit, IconPlus } from '../../../components/ui/icons';
 import { getRepositories } from '../../../repositories';
 import type { ShiftTypeRecord } from '../../../repositories/domain';
 import { describeConfigurationError } from './errorMessages';
+import { RecurringScheduleCard } from './RecurringScheduleCard';
 import { slugifyKey } from './slugifyKey';
 
 export function ResortShiftSetupPanel() {
@@ -82,14 +83,7 @@ export function ResortShiftSetupPanel() {
 
       {selectedResort && <ShiftTypesCard resortId={selectedResort.id} resortName={selectedResort.name} />}
 
-      <Card style={{ marginTop: 16 }}>
-        <CardHeader title="Recurring shift templates" />
-        <EmptyState
-          icon={<IconCalendar />}
-          title="Coming in a later stage"
-          hint="Recurring shift templates (days of week, pay, headcount) will be editable here once Stage 2D wires up template management. The shift types above already provide the stable identity they'll attach to."
-        />
-      </Card>
+      {selectedResort && <RecurringScheduleCard resortId={selectedResort.id} resortName={selectedResort.name} />}
     </>
   );
 }

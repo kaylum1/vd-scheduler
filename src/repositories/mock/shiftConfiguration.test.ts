@@ -73,3 +73,94 @@ describe('MockShiftConfigurationRepository: Stage 2D Checkpoint 1 (live Configur
     expect(deactivated.isActive).toBe(false);
   });
 });
+
+describe('MockShiftConfigurationRepository: Stage 2D Checkpoint 2 (recurring schedule)', () => {
+  beforeEach(resetMockFixturesForTesting);
+  const repo = new MockShiftConfigurationRepository();
+
+  it('createShiftTemplateVersion accepts an optional effectiveTo (open-ended when omitted)', async () => {
+    const openEnded = await repo.createShiftTemplateVersion({
+      shiftTypeId: 'mock-crans-dinner',
+      resortId: 'mock-crans',
+      weekday: 5, // Saturday -- Monday (0) is already taken by the baseline fixture
+      startTime: '12:00',
+      endTime: '14:30',
+      requiredDrivers: 1,
+      basePayChf: 30,
+      deliveryRateChf: 12,
+      effectiveFrom: '2026-01-01',
+      isPremium: false,
+    });
+    expect(openEnded.effectiveTo).toBeNull();
+
+    const bounded = await repo.createShiftTemplateVersion({
+      shiftTypeId: 'mock-crans-dinner',
+      resortId: 'mock-crans',
+      weekday: 6, // Sunday
+      startTime: '12:00',
+      endTime: '14:30',
+      requiredDrivers: 1,
+      basePayChf: 30,
+      deliveryRateChf: 12,
+      effectiveFrom: '2026-01-01',
+      effectiveTo: '2026-03-01',
+      isPremium: false,
+    });
+    expect(bounded.effectiveTo).toBe('2026-03-01');
+  });
+
+  it('rejects a second active template for the same weekday with overlapping dates (mirrors shift_templates_no_overlap)', async () => {
+    // mock-crans-dinner-tpl already covers Monday (weekday 0) from 2024-01-01, open-ended.
+    await expect(
+      repo.createShiftTemplateVersion({
+        shiftTypeId: 'mock-crans-dinner',
+        resortId: 'mock-crans',
+        weekday: 0,
+        startTime: '19:00',
+        endTime: '22:00',
+        requiredDrivers: 2,
+        basePayChf: 30,
+        deliveryRateChf: 12,
+        effectiveFrom: '2026-06-01',
+        isPremium: false,
+      })
+    ).rejects.toMatchObject({ code: '23P01' });
+  });
+
+  it('allows a non-overlapping revision: deactivate the old version, then create a new one starting after it ends', async () => {
+    await repo.deactivateShiftTemplate('mock-crans-dinner-tpl', '2026-05-31');
+    const revised = await repo.createShiftTemplateVersion({
+      shiftTypeId: 'mock-crans-dinner',
+      resortId: 'mock-crans',
+      weekday: 0,
+      startTime: '18:30',
+      endTime: '21:30',
+      requiredDrivers: 1,
+      basePayChf: 30,
+      deliveryRateChf: 12,
+      effectiveFrom: '2026-06-01',
+      isPremium: false,
+    });
+    expect(revised.startTime).toBe('18:30');
+
+    const active = (await repo.listShiftTemplates('mock-crans-dinner')).filter((t) => t.isActive && t.weekday === 0);
+    expect(active).toHaveLength(1);
+    expect(active[0].id).toBe(revised.id);
+  });
+
+  it('a template for a different weekday never conflicts, even with an identical date range', async () => {
+    const created = await repo.createShiftTemplateVersion({
+      shiftTypeId: 'mock-crans-dinner',
+      resortId: 'mock-crans',
+      weekday: 1, // Tuesday -- distinct from the baseline Monday fixture
+      startTime: '18:00',
+      endTime: '21:30',
+      requiredDrivers: 1,
+      basePayChf: 30,
+      deliveryRateChf: 12,
+      effectiveFrom: '2024-01-01',
+      isPremium: false,
+    });
+    expect(created.weekday).toBe(1);
+  });
+});

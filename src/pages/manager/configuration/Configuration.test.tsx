@@ -23,6 +23,18 @@ function renderWithQueryClient(ui: React.ReactElement) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
+/**
+ * Since Stage 2D Checkpoint 2, ResortShiftSetupPanel also renders a
+ * Recurring Shift Schedule card below Shift Types — and the mock fixtures'
+ * shift type and its recurring schedule are both plausibly named "Dinner"
+ * on screen at once. Scope queries to the Shift Types card specifically
+ * (found via its own "Shift types — <resort>" header) rather than loosening
+ * assertions to "at least one match".
+ */
+function shiftTypesCard(resortName: string): HTMLElement {
+  return screen.getByText(new RegExp(`Shift types — ${resortName}`)).closest('.card') as HTMLElement;
+}
+
 beforeEach(() => {
   resetMockFixturesForTesting();
   resetRepositoriesForTesting();
@@ -48,12 +60,12 @@ describe('Configuration: Resorts (live, via ResortRepository)', () => {
     await screen.findByRole('tab', { name: /Crans-Montana/ });
 
     // Crans-Montana is selected by default (first resort loaded).
-    expect(await screen.findByText('Dinner')).toBeInTheDocument();
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('tab', { name: /Zermatt/ }));
 
     await waitFor(() => expect(screen.getByText(/Shift types — Zermatt/)).toBeInTheDocument());
-    expect(await screen.findByText('Dinner')).toBeInTheDocument(); // Zermatt also has one, different row underneath
+    await waitFor(() => expect(within(shiftTypesCard('Zermatt')).getByText('Dinner')).toBeInTheDocument()); // Zermatt also has one, different row underneath
   });
 
   it('3. shows a deliberate loading state before resorts resolve', () => {
@@ -295,27 +307,27 @@ describe('Configuration: Shift Types (live, via ShiftConfigurationRepository)', 
   it('14. shift types for the selected resort load from the repository', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
     await screen.findByRole('tab', { name: /Crans-Montana/ });
-    expect(await screen.findByText('Dinner')).toBeInTheDocument();
-    expect(screen.getByText('dinner')).toBeInTheDocument(); // stable key badge
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
+    expect(within(shiftTypesCard('Crans-Montana')).getByText('dinner')).toBeInTheDocument(); // stable key badge
   });
 
   it('15. creating a shift type goes through the repository and appears in the list', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
     await screen.findByRole('tab', { name: /Crans-Montana/ });
-    await screen.findByText('Dinner');
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /Add shift type/i }));
     fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Lunch' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create shift type' }));
 
-    expect(await screen.findByText('Lunch')).toBeInTheDocument();
-    expect(screen.getByText('lunch')).toBeInTheDocument(); // auto-slugified key
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Lunch')).toBeInTheDocument());
+    expect(within(shiftTypesCard('Crans-Montana')).getByText('lunch')).toBeInTheDocument(); // auto-slugified key
   });
 
   it('16. a duplicate key at the same resort is rejected with a clear error, not a crash', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
     await screen.findByRole('tab', { name: /Crans-Montana/ });
-    await screen.findByText('Dinner');
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /Add shift type/i }));
     fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Dinner Redux' } });
@@ -330,44 +342,46 @@ describe('Configuration: Shift Types (live, via ShiftConfigurationRepository)', 
   it('17. renaming the display name never alters the stable key', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
     await screen.findByRole('tab', { name: /Crans-Montana/ });
-    await screen.findByText('Dinner');
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Dinner' }));
     const nameInput = await screen.findByLabelText('Display name');
     fireEvent.change(nameInput, { target: { value: 'Dinner Service' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    await screen.findByText('Dinner Service');
-    expect(screen.getByText('dinner')).toBeInTheDocument(); // key badge unchanged
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner Service')).toBeInTheDocument());
+    expect(within(shiftTypesCard('Crans-Montana')).getByText('dinner')).toBeInTheDocument(); // key badge unchanged
   });
 
   it('18. changing sort order updates ordering', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
     await screen.findByRole('tab', { name: /Crans-Montana/ });
-    await screen.findByText('Dinner');
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /Add shift type/i }));
     fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Breakfast' } });
     fireEvent.change(screen.getByLabelText('Sort order'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create shift type' }));
-    await screen.findByText('Breakfast');
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Breakfast')).toBeInTheDocument());
 
-    const titlesBefore = screen.getAllByText(/Sort order/).map((el) => el.previousSibling?.textContent);
+    const titlesBefore = within(shiftTypesCard('Crans-Montana'))
+      .getAllByText(/Sort order/)
+      .map((el) => el.previousSibling?.textContent);
     expect(titlesBefore[0]).toContain('Breakfast'); // sort_order 0 sorts first, ahead of Dinner's 1
   });
 
   it('19. deactivation is blocked while an active recurring template exists, surfaced as a manager-facing error', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
     await screen.findByRole('tab', { name: /Crans-Montana/ });
-    await screen.findByText('Dinner');
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    fireEvent.click(within(shiftTypesCard('Crans-Montana')).getByRole('button', { name: 'Deactivate' }));
     await screen.findByRole('heading', { name: 'Deactivate Dinner?' });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
 
     expect(await screen.findByText(/still has an active recurring template/i)).toBeInTheDocument();
     // Dialog stays open, Dinner is still active -- not silently dropped.
-    expect(screen.getAllByText('Dinner').length).toBeGreaterThan(0);
+    expect(within(shiftTypesCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument();
   });
 
   it('20. a Zermatt shift type never appears under Crans-Montana', async () => {
@@ -377,12 +391,12 @@ describe('Configuration: Shift Types (live, via ShiftConfigurationRepository)', 
 
     // Both resorts' fixture shift type happens to be named "Dinner" too --
     // scoping is what's under test, not the label -- so assert exactly one
-    // row is shown for Crans-Montana.
-    expect(screen.getAllByText('Dinner')).toHaveLength(1);
+    // row is shown for Crans-Montana's Shift Types card specifically.
+    await waitFor(() => expect(within(shiftTypesCard('Crans-Montana')).getAllByText('Dinner')).toHaveLength(1));
 
     fireEvent.click(screen.getByRole('tab', { name: /Zermatt/ }));
     await waitFor(() => expect(screen.getByText(/Shift types — Zermatt/)).toBeInTheDocument());
-    expect(await screen.findByText('Dinner')).toBeInTheDocument();
+    await waitFor(() => expect(within(shiftTypesCard('Zermatt')).getByText('Dinner')).toBeInTheDocument());
   });
 });
 

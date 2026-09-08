@@ -104,6 +104,12 @@ export interface ShiftConfigurationRepository {
   /** Rejected by the database if any of the shift type's recurring templates are still active — surface that as a manager-facing error, not a workaround. */
   deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord>;
 
+  /**
+   * Overlap (same resort/shift type/weekday, active, overlapping effective
+   * range) is rejected by the database's exclusion constraint — surface
+   * that as a manager-facing "already a schedule covering that day" error,
+   * never a raw constraint message.
+   */
   createShiftTemplateVersion(input: {
     shiftTypeId: string;
     resortId: string;
@@ -115,8 +121,18 @@ export interface ShiftConfigurationRepository {
     deliveryRateChf: number;
     isPremium: boolean;
     effectiveFrom: string;
+    /** Open-ended (current/ongoing) when omitted. */
+    effectiveTo?: string;
   }): Promise<ShiftTemplateRecord>;
-  /** Closes a template version through the effective-dated model (sets effective_to + is_active=false) — never a raw field update. */
+  /**
+   * Closes a template version through the effective-dated model (sets
+   * effective_to + is_active=false) — never a raw field update. To "revise"
+   * an active template (change its time/pay/headcount going forward),
+   * deactivate it with effectiveTo = the day before the new version's
+   * effectiveFrom, then call createShiftTemplateVersion for the new one —
+   * there is no combined "update in place" operation, matching the
+   * approved effective-dated model (past configuration is never rewritten).
+   */
   deactivateShiftTemplate(templateId: string, effectiveTo: string): Promise<ShiftTemplateRecord>;
 
   // Deliberately no "moveShiftInstanceDate"-style method: shift_instances.date

@@ -476,6 +476,8 @@
 
 .form-field input[type='text'],
 .form-field input[type='number'],
+.form-field input[type='time'],
+.form-field input[type='date'],
 .form-field select {
   font-family: inherit;
   font-size: 13.5px;
@@ -484,6 +486,7 @@
   border: 1px solid var(--border-default);
   background: var(--bg-panel);
   color: var(--text-primary);
+  width: 100%;
 }
 
 .form-field input:disabled,
@@ -505,6 +508,42 @@
   font-size: 11.5px;
   color: var(--red-600);
   font-weight: 600;
+}
+
+.form-field--checkbox label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+}
+
+.form-field--checkbox input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+/* ---------- Form row: two fields side by side, stacking on mobile ---------- */
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.form-row .form-field {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
 }
 
 /* ---------- Segmented control (e.g. resort selector) ---------- */

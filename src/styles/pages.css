@@ -666,6 +666,153 @@
   }
 }
 
+/* ---------- Configuration: recurring shift schedule (Stage 2D Checkpoint 2) ---------- */
+.schedule-section {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.schedule-section:last-child {
+  border-bottom: none;
+}
+
+.schedule-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.schedule-section__header strong {
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+
+.schedule-empty {
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.schedule-days {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.schedule-day {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  background: var(--bg-panel-muted);
+  border-radius: var(--radius-sm);
+}
+
+.schedule-day__weekday {
+  flex-shrink: 0;
+  width: 40px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--blue-700);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.schedule-day__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.schedule-day__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.schedule-day__row--muted {
+  font-weight: 400;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+}
+
+.schedule-day__time {
+  white-space: nowrap;
+}
+
+.schedule-day__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ---------- Configuration: schedule-refresh preview groups ---------- */
+.schedule-refresh-group {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.schedule-refresh-group:last-child {
+  margin-bottom: 0;
+}
+
+.schedule-refresh-group__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.schedule-refresh-group__header strong {
+  font-size: 13px;
+}
+
+.schedule-refresh-group__header span {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.schedule-refresh-group__changes {
+  margin: 0 0 6px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.schedule-refresh-group__meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 640px) {
+  .schedule-day {
+    flex-wrap: wrap;
+  }
+
+  .schedule-day__weekday {
+    width: auto;
+  }
+
+  .schedule-day__actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
 /* ---------- Driver: My Rota ---------- */
 .driver-week-summary {
   display: flex;

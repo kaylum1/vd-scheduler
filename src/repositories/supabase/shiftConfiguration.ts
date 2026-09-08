@@ -112,6 +112,7 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
     deliveryRateChf: number;
     isPremium: boolean;
     effectiveFrom: string;
+    effectiveTo?: string;
   }): Promise<ShiftTemplateRecord> {
     const rows = await unwrap(
       'shiftConfiguration.createShiftTemplateVersion',
@@ -128,6 +129,7 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
           delivery_rate_chf: input.deliveryRateChf,
           is_premium: input.isPremium,
           effective_from: input.effectiveFrom,
+          ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
         })
         .select('*')
     );
