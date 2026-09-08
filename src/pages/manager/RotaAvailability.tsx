@@ -5,15 +5,18 @@ import { WeekNav } from '../../components/rota/WeekNav';
 import { Button } from '../../components/ui/Button';
 import { StatusPill } from '../../components/ui/StatusPill';
 import { addWeeks, startOfWeek } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import { resorts } from '../../mock-data/resorts';
 import type { ShiftInstance } from '../../types';
 
 export function RotaAvailabilityPage() {
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  // Rota week boundaries are operational (Europe/Zurich) data — see
+  // src/lib/operationalTime.ts — not the viewer's browser timezone.
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(getOperationalToday()));
   const [lastAction, setLastAction] = useState<string | null>(null);
 
   // Demo rule: only the current week is treated as already published.
-  const isCurrentWeek = weekStart.getTime() === startOfWeek(new Date()).getTime();
+  const isCurrentWeek = weekStart.getTime() === startOfWeek(getOperationalToday()).getTime();
 
   const handleManageShift = (shift: ShiftInstance) => {
     setLastAction(
@@ -32,7 +35,7 @@ export function RotaAvailabilityPage() {
               weekStart={weekStart}
               onPrev={() => setWeekStart((d) => addWeeks(d, -1))}
               onNext={() => setWeekStart((d) => addWeeks(d, 1))}
-              onThisWeek={() => setWeekStart(startOfWeek(new Date()))}
+              onThisWeek={() => setWeekStart(startOfWeek(getOperationalToday()))}
               statusChip={
                 <StatusPill tone={isCurrentWeek ? 'green' : 'grey'}>
                   {isCurrentWeek ? 'Published' : 'Draft'}

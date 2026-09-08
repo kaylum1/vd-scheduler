@@ -1,10 +1,15 @@
 import React from 'react';
 import { formatWeekRangeLabel, getWeekOffset, startOfWeek } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import { IconChevronLeft, IconChevronRight } from '../ui/icons';
 
 export type WeekRelation = 'archive' | 'current' | 'next' | 'future';
 
-export function getWeekRelation(weekStart: Date, today = new Date()): WeekRelation {
+// "today" defaults to the operational (Europe/Zurich) date, not the
+// viewer's browser timezone — see src/lib/operationalTime.ts. "This
+// Week"/"Next Week" must mean the same calendar week for every viewer
+// regardless of where they are.
+export function getWeekRelation(weekStart: Date, today = getOperationalToday()): WeekRelation {
   const offset = getWeekOffset(weekStart, startOfWeek(today));
   if (offset < 0) return 'archive';
   if (offset === 0) return 'current';

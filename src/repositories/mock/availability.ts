@@ -1,4 +1,5 @@
 import { startOfWeek, toISODate } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import type { AvailabilityRepository } from '../types';
 import type {
   AvailabilityAnswer,
@@ -24,8 +25,8 @@ import { generateMockShiftInstancesForWeek } from './shiftInstances';
 export class MockAvailabilityRepository implements AvailabilityRepository {
   async listDriverVisibleShifts(resortId: string): Promise<DriverVisibleShift[]> {
     // Mock mode has no fixed "current" week; callers of this method get
-    // shifts for the current calendar week by convention.
-    const weekStart = toISODate(startOfWeek(new Date()));
+    // shifts for the current operational (Europe/Zurich) week by convention.
+    const weekStart = toISODate(startOfWeek(getOperationalToday()));
     return generateMockShiftInstancesForWeek(resortId, weekStart).map((instance) => ({
       id: instance.id,
       resortId: instance.resortId,

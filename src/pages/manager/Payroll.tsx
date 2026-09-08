@@ -16,6 +16,7 @@ import {
   startOfWeek,
   toISODate,
 } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import { driverById } from '../../mock-data/drivers';
 import { resortById } from '../../mock-data/resorts';
 import { payrollRows } from '../../mock-data/payroll';
@@ -45,7 +46,9 @@ function rangeForShortcut(shortcut: Shortcut, today: Date): [Date, Date] {
 }
 
 export function PayrollPage() {
-  const today = new Date();
+  // Payroll period shortcuts (This Week/Last Week/...) align with
+  // operational (Europe/Zurich) weeks/months — see src/lib/operationalTime.ts.
+  const today = getOperationalToday();
   const [range, setRange] = useState<[Date, Date]>(() => rangeForShortcut('this-month', today));
   const [startDate, endDate] = range;
   const [activeShortcut, setActiveShortcut] = useState<Shortcut | null>('this-month');

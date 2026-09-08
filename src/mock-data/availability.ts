@@ -1,5 +1,6 @@
 import type { AvailabilityEntry, AvailabilityStatus, ShiftInstance } from '../types';
 import { addWeeks, startOfWeek } from './date-utils';
+import { getOperationalToday } from '../lib/operationalTime';
 import { generateWeekShiftInstances } from './shifts';
 
 /** How many past weeks are kept visible as read-only archive/history. */
@@ -14,7 +15,7 @@ export const ARCHIVE_WEEKS_BACK = 2;
  * This publish boundary is mock-only — a real scheduling service decides
  * it for real later.
  */
-export function getAvailabilityWindowInstances(resortId: string, today = new Date()): ShiftInstance[] {
+export function getAvailabilityWindowInstances(resortId: string, today = getOperationalToday()): ShiftInstance[] {
   const currentWeekStart = startOfWeek(today);
   const windowStart = addWeeks(currentWeekStart, -ARCHIVE_WEEKS_BACK);
   const endOfNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0);

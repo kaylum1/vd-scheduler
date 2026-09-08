@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { StatusPill } from '../../components/ui/StatusPill';
 import { IconCheck, IconLock } from '../../components/ui/icons';
 import { addWeeks, formatWeekRangeLabel, parseISODate, startOfWeek, toISODate } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import {
   buildAvailabilityEntries,
   getAvailabilityWindowInstances,
@@ -28,7 +29,9 @@ export function AvailabilityPage() {
   const { currentUser } = useAuth();
   const activeDriverId = currentUser?.role === 'driver' ? currentUser.driverId : '';
   const driver = driverById(activeDriverId);
-  const currentWeekStart = startOfWeek(new Date());
+  // The current/next actionable week is operational (Europe/Zurich) data —
+  // see src/lib/operationalTime.ts — not the viewer's browser timezone.
+  const currentWeekStart = startOfWeek(getOperationalToday());
   const currentWeekKey = toISODate(currentWeekStart);
 
   const instances = useMemo(

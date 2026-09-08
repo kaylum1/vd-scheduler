@@ -2,7 +2,15 @@
  * Small date helpers shared by the mock-data generators and the rota UI.
  * Pure functions only — no business logic (fairness, publishing rules, etc.)
  * lives here, that will arrive with the real scheduling service.
+ *
+ * Timezone note (Stage 2C.1): every function below is pure calendar
+ * arithmetic on a `Date` it's given — safe regardless of the browser's
+ * timezone, since it never crosses through a UTC conversion. `isToday`/
+ * `isTomorrow` are the exception: "today" is operational data (see
+ * `src/lib/operationalTime.ts`), so they resolve it via
+ * `getOperationalToday()` (Europe/Zurich) rather than a bare `new Date()`.
  */
+import { getOperationalToday } from '../lib/operationalTime';
 
 export const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export const WEEKDAY_LABELS_FULL = [
@@ -72,11 +80,11 @@ export function isSameDate(a: Date, b: Date): boolean {
 }
 
 export function isToday(date: Date): boolean {
-  return isSameDate(date, new Date());
+  return isSameDate(date, getOperationalToday());
 }
 
 export function isTomorrow(date: Date): boolean {
-  return isSameDate(date, addDays(new Date(), 1));
+  return isSameDate(date, addDays(getOperationalToday(), 1));
 }
 
 /** Whole weeks between two Monday-anchored week-starts (b - a, in weeks). */

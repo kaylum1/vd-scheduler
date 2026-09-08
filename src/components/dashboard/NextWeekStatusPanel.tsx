@@ -1,6 +1,7 @@
 import React from 'react';
 import { getResortWeekReadiness } from '../../lib/rotaReadiness';
 import { addWeeks, formatWeekRangeLabel, startOfWeek } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import { resorts } from '../../mock-data/resorts';
 import { StatusPill, type StatusTone } from '../ui/StatusPill';
 import { IconAlert, IconCheck, IconTruck } from '../ui/icons';
@@ -11,7 +12,8 @@ import { IconAlert, IconCheck, IconTruck } from '../ui/icons';
  * still uncovered.
  */
 export function NextWeekStatusPanel() {
-  const nextWeekStart = addWeeks(startOfWeek(new Date()), 1);
+  // Week boundaries are operational (Europe/Zurich) — see src/lib/operationalTime.ts.
+  const nextWeekStart = addWeeks(startOfWeek(getOperationalToday()), 1);
 
   return (
     <div className="card">

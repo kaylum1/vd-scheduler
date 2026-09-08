@@ -7,6 +7,7 @@ import { StatusPill } from '../../components/ui/StatusPill';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { IconCalendar, IconClock } from '../../components/ui/icons';
 import { addWeeks, getWeekDates, isToday, startOfWeek, toISODate, WEEKDAY_LABELS } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import { driverById } from '../../mock-data/drivers';
 import { resortById } from '../../mock-data/resorts';
 import { generateWeekShiftInstances } from '../../mock-data/shifts';
@@ -19,10 +20,12 @@ export function MyRotaPage() {
   // session can never coincidentally render another driver's mock rota.
   const { currentUser } = useAuth();
   const activeDriverId = currentUser?.role === 'driver' ? currentUser.driverId : '';
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  // The current week is operational (Europe/Zurich) data — see
+  // src/lib/operationalTime.ts — not the viewer's browser timezone.
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(getOperationalToday()));
   const driver = driverById(activeDriverId);
 
-  const isCurrentWeek = weekStart.getTime() === startOfWeek(new Date()).getTime();
+  const isCurrentWeek = weekStart.getTime() === startOfWeek(getOperationalToday()).getTime();
   const shifts = driver
     ? generateWeekShiftInstances(weekStart, isCurrentWeek).filter(
         (s) => s.resortId === driver.resortId && s.assignedDriverIds.includes(driver.id)
@@ -53,7 +56,7 @@ export function MyRotaPage() {
             weekStart={weekStart}
             onPrev={() => setWeekStart((d) => addWeeks(d, -1))}
             onNext={() => setWeekStart((d) => addWeeks(d, 1))}
-            onThisWeek={() => setWeekStart(startOfWeek(new Date()))}
+            onThisWeek={() => setWeekStart(startOfWeek(getOperationalToday()))}
           />
         }
       />

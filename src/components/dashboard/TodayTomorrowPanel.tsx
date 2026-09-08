@@ -2,7 +2,8 @@ import React from 'react';
 import { driverById } from '../../mock-data/drivers';
 import { resorts } from '../../mock-data/resorts';
 import { generateWeekShiftInstances } from '../../mock-data/shifts';
-import { startOfWeek, toISODate } from '../../mock-data/date-utils';
+import { addDays, startOfWeek, toISODate } from '../../mock-data/date-utils';
+import { getOperationalToday } from '../../lib/operationalTime';
 import type { ShiftInstance } from '../../types';
 import { IconAlert, IconClock } from '../ui/icons';
 
@@ -78,9 +79,10 @@ function DayCard({ label, date }: { label: string; date: Date }) {
  * the first thing a manager should see, ahead of any stats.
  */
 export function TodayTomorrowPanel() {
-  const today = new Date();
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
+  // "Today"/"Tomorrow" are operational (Europe/Zurich) dates, not the
+  // viewer's browser timezone — see src/lib/operationalTime.ts.
+  const today = getOperationalToday();
+  const tomorrow = addDays(today, 1);
 
   return (
     <div className="op-panel">
