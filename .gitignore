@@ -5,3 +5,6 @@ dist
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+vitest.config.js
+vitest.config.d.ts
+.env
