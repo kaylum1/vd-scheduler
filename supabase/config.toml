@@ -155,11 +155,13 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+site_url = "http://localhost:5173"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+# Both localhost/127.0.0.1 variants of the Vite dev server (see vite.config.ts) are allowed so the
+# password-reset recovery link works regardless of which host the developer opened the app on.
+additional_redirect_urls = ["http://localhost:5173", "http://127.0.0.1:5173"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -171,8 +173,10 @@ enable_refresh_token_rotation = true
 # Allows refresh tokens to be reused after expiry, up to the specified interval in seconds.
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
+# VD Scheduler is a private staff application: accounts are provisioned by a
+# manager (a future privileged server-side workflow), never self-registered.
 # Allow/disallow new user signups to your project.
-enable_signup = true
+enable_signup = false
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
@@ -216,7 +220,13 @@ web3 = 30
 # secret = ""
 
 [auth.email]
-# Allow/disallow new user signups via email to your project.
+# Allow/disallow new user signups via email to your project. Must stay
+# true here (this is the email PROVIDER switch, not just signup, on this
+# CLI version -- setting it false also blocks password sign-in). The
+# actual "no self-signup" enforcement is [auth].enable_signup = false
+# above, which independently blocks the /signup endpoint while leaving
+# sign-in for already-provisioned accounts working. Verified via a local
+# smoke test (see docs/local-auth-setup.md).
 enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.

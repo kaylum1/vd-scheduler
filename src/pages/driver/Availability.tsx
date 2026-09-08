@@ -13,7 +13,7 @@ import {
   mockConfirmedWeekOffsets,
 } from '../../mock-data/availability';
 import { driverById } from '../../mock-data/drivers';
-import { useAppState } from '../../state/AppStateContext';
+import { useAuth } from '../../auth/AuthContext';
 import type { AvailabilityStatus, ShiftInstance } from '../../types';
 
 type WeekStatus = 'locked' | 'submitted' | 'open';
@@ -23,7 +23,10 @@ function isWeekPublished(weekShifts: ShiftInstance[]): boolean {
 }
 
 export function AvailabilityPage() {
-  const { activeDriverId } = useAppState();
+  // See MyRota.tsx for why this comes from useAuth() rather than
+  // useAppState().activeDriverId directly.
+  const { currentUser } = useAuth();
+  const activeDriverId = currentUser?.role === 'driver' ? currentUser.driverId : '';
   const driver = driverById(activeDriverId);
   const currentWeekStart = startOfWeek(new Date());
   const currentWeekKey = toISODate(currentWeekStart);

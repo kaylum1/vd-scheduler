@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "seed:local-users": "node scripts/seed-local-test-users.mjs",
     "db:types": "supabase gen types typescript --local > src/types/database.generated.ts.tmp && (echo '// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.' && echo '// Regenerate with: npm run db:types' && echo '// Source: local Supabase Postgres schema (npx supabase gen types typescript --local)' && echo '' && cat src/types/database.generated.ts.tmp) > src/types/database.generated.ts && rm src/types/database.generated.ts.tmp"
   },
   "dependencies": {
@@ -18,9 +19,12 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^14.3.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.1",
     "supabase": "^2.116.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.0",

@@ -3,17 +3,21 @@ import { drivers } from '../../mock-data/drivers';
 import { resortById } from '../../mock-data/resorts';
 import { useRouter } from '../../router';
 import { useAppState } from '../../state/AppStateContext';
+import { getDataProvider } from '../../lib/env';
 import { Avatar } from '../ui/Avatar';
 
 /**
  * Stage 1 stand-in for authentication/session switching. Lets a reviewer
  * flip between the Manager and Driver interface states, and — for the
  * Driver state — pick which driver is "signed in" so My Rota / Availability
- * have something concrete to show. This entire control is removed once
- * real auth exists.
+ * have something concrete to show. Meaningless once a real session exists
+ * (role there comes from app_users, not a client toggle) — hidden rather
+ * than shown-but-inert in Supabase mode. Removed wholesale once mock mode
+ * itself goes away.
  */
 export function RoleSwitcher() {
   const { role, setRole, activeDriverId, setActiveDriverId } = useAppState();
+  if (getDataProvider() !== 'mock') return null;
   const { navigate } = useRouter();
   const activeDriver = drivers.find((d) => d.id === activeDriverId);
   const resort = activeDriver ? resortById(activeDriver.resortId) : undefined;

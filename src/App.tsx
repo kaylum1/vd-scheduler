@@ -1,7 +1,9 @@
 import React, { useEffect } from 'react';
 import { AppShell } from './components/layout/AppShell';
 import { RouterProvider, useRouter } from './router';
-import { AppStateProvider, useAppState } from './state/AppStateContext';
+import { AppStateProvider } from './state/AppStateContext';
+import { AuthProvider, useAuth } from './auth/AuthContext';
+import { AuthGate } from './auth/AuthGate';
 import { DashboardPage } from './pages/manager/Dashboard';
 import { RotaAvailabilityPage } from './pages/manager/RotaAvailability';
 import { PayrollPage } from './pages/manager/Payroll';
@@ -14,10 +16,14 @@ const driverDefaultPath = '/driver/my-rota';
 
 function RouteOutlet() {
   const { path, navigate } = useRouter();
-  const { role, isLoggedOut } = useAppState();
+  // Route guards use the real, app_users-backed role (mock mode's
+  // useAuth() reflects the same Manager/Driver switch state useAppState()
+  // would give) — never trust the router or any client-side toggle alone
+  // for which UI a session may reach.
+  const { role, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    if (isLoggedOut) return;
+    if (!isAuthenticated || !role) return;
     const isManagerPath = path.startsWith('/manager');
     const isDriverPath = path.startsWith('/driver');
 
@@ -31,7 +37,7 @@ function RouteOutlet() {
     } else if (role === 'driver' && isManagerPath) {
       navigate(driverDefaultPath);
     }
-  }, [path, role, isLoggedOut]);
+  }, [path, role, isAuthenticated]);
 
   switch (path) {
     case '/manager/dashboard':
@@ -62,9 +68,13 @@ function Shell() {
 export default function App() {
   return (
     <AppStateProvider>
-      <RouterProvider>
-        <Shell />
-      </RouterProvider>
+      <AuthProvider>
+        <RouterProvider>
+          <AuthGate>
+            <Shell />
+          </AuthGate>
+        </RouterProvider>
+      </AuthProvider>
     </AppStateProvider>
   );
 }

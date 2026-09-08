@@ -10,10 +10,15 @@ import { addWeeks, getWeekDates, isToday, startOfWeek, toISODate, WEEKDAY_LABELS
 import { driverById } from '../../mock-data/drivers';
 import { resortById } from '../../mock-data/resorts';
 import { generateWeekShiftInstances } from '../../mock-data/shifts';
-import { useAppState } from '../../state/AppStateContext';
+import { useAuth } from '../../auth/AuthContext';
 
 export function MyRotaPage() {
-  const { activeDriverId } = useAppState();
+  // Driver identity comes from useAuth() (real app_users-backed identity
+  // in Supabase mode; the same value useAppState().activeDriverId would
+  // give in mock mode) — not a client-side toggle, so one driver's
+  // session can never coincidentally render another driver's mock rota.
+  const { currentUser } = useAuth();
+  const activeDriverId = currentUser?.role === 'driver' ? currentUser.driverId : '';
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const driver = driverById(activeDriverId);
 

@@ -30,6 +30,11 @@ Then open the printed local URL (defaults to http://localhost:5173).
 `npm run build` produces a production build; `npm run preview` serves it
 locally.
 
+By default (`VITE_DATA_PROVIDER=mock`) the app runs exactly as described
+below — no backend, no login. To run it against the real local Supabase
+backend and real authentication instead, see
+[`docs/local-auth-setup.md`](docs/local-auth-setup.md).
+
 ## Project structure
 
 ```
