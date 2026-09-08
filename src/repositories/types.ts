@@ -21,17 +21,22 @@
  */
 
 import type {
+  ApplyTemplateCancellationResult,
+  ApplyTemplateRefreshResult,
   AvailabilityAnswer,
   AvailabilityStatus,
   ConfirmWeekOutcome,
   DriverRecord,
   DriverVisibleAssignment,
   DriverVisibleShift,
+  MaterialiseShiftsResult,
   ReopenWeekOutcome,
   ResortRecord,
   ShiftInstanceRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
+  TemplateCancellationPreviewRow,
+  TemplateRefreshPreviewRow,
   WeekAvailabilityStatus,
 } from './domain';
 
@@ -78,6 +83,21 @@ export interface ShiftConfigurationRepository {
   // Deliberately no "moveShiftInstanceDate"-style method: shift_instances.date
   // is immutable (Checkpoint 4). Moving a shift is cancel + create new,
   // which belongs to a future rota-management checkpoint, not here.
+
+  // Stage 2C: materialisation + template refresh/cancellation. Thin RPC
+  // wrappers only — the database functions remain authoritative; nothing
+  // here reimplements their logic. Not yet wired into any UI.
+
+  /** Insert-only: creates missing shift_instances from active templates. Default horizon: today through end of next month. */
+  materialiseShifts(resortId: string, fromDate?: string, toDate?: string): Promise<MaterialiseShiftsResult>;
+  /** Read-only: what apply_template_refresh would change for the currently-safe (v_refreshable_instances) set. */
+  previewTemplateRefresh(resortId: string, fromDate?: string): Promise<TemplateRefreshPreviewRow[]>;
+  /** Updates exactly the previewed safe set from their current governing template. Never removes assignments. */
+  applyTemplateRefresh(resortId: string, fromDate?: string): Promise<ApplyTemplateRefreshResult>;
+  /** Read-only: future template-origin instances that lost their governing template, and whether each is safe to cancel. */
+  previewTemplateCancellation(resortId: string, shiftTypeId?: string): Promise<TemplateCancellationPreviewRow[]>;
+  /** Cancels (never deletes) exactly the safe subset preview_template_cancellation reports. */
+  applyTemplateCancellation(resortId: string, shiftTypeId?: string, reason?: string): Promise<ApplyTemplateCancellationResult>;
 }
 
 export interface AvailabilityRepository {

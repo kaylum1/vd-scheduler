@@ -6,16 +6,22 @@
 
 import type { Database } from '../../types/database.generated';
 import type {
+  ApplyTemplateCancellationResult,
+  ApplyTemplateRefreshResult,
   AvailabilityAnswer,
   ConfirmWeekOutcome,
   DriverRecord,
   DriverVisibleAssignment,
   DriverVisibleShift,
+  MaterialiseShiftsResult,
   ReopenWeekOutcome,
   ResortRecord,
   ShiftInstanceRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
+  TemplateCancellationPreviewRow,
+  TemplateRefreshFieldChange,
+  TemplateRefreshPreviewRow,
   WeekAvailabilityStatus,
 } from '../domain';
 
@@ -30,6 +36,11 @@ type DriverVisibleAssignmentRow = Database['public']['Views']['driver_visible_as
 type WeekAvailabilityStatusRow = Database['public']['Functions']['week_availability_status']['Returns'][number];
 type ConfirmWeekRow = Database['public']['Functions']['confirm_availability_week']['Returns'][number];
 type ReopenWeekRow = Database['public']['Functions']['reopen_availability_week']['Returns'][number];
+type MaterialiseShiftsRow = Database['public']['Functions']['materialise_shift_instances']['Returns'][number];
+type TemplateRefreshPreviewDbRow = Database['public']['Functions']['preview_template_refresh']['Returns'][number];
+type ApplyTemplateRefreshRow = Database['public']['Functions']['apply_template_refresh']['Returns'][number];
+type TemplateCancellationPreviewDbRow = Database['public']['Functions']['preview_template_cancellation']['Returns'][number];
+type ApplyTemplateCancellationRow = Database['public']['Functions']['apply_template_cancellation']['Returns'][number];
 
 export function mapResort(row: ResortRow): ResortRecord {
   return {
@@ -179,5 +190,64 @@ export function mapReopenWeekOutcome(row: ReopenWeekRow): ReopenWeekOutcome {
     weekStart: row.week_start,
     reopenedAt: row.reopened_at,
     reopenedReason: row.reopened_reason,
+  };
+}
+
+export function mapMaterialiseShiftsResult(row: MaterialiseShiftsRow): MaterialiseShiftsResult {
+  return {
+    createdCount: row.created_count,
+    skippedExistingCount: row.skipped_existing_count,
+    fromDate: row.from_date,
+    toDate: row.to_date,
+  };
+}
+
+export function mapTemplateRefreshPreviewRow(row: TemplateRefreshPreviewDbRow): TemplateRefreshPreviewRow {
+  return {
+    shiftInstanceId: row.shift_instance_id,
+    date: row.date,
+    shiftTypeId: row.shift_type_id,
+    shiftKey: row.shift_key,
+    name: row.name,
+    currentTemplateId: row.current_template_id,
+    newTemplateId: row.new_template_id,
+    willChange: row.will_change,
+    changedFields: (row.changed_fields ?? {}) as unknown as Record<string, TemplateRefreshFieldChange>,
+    assignmentCount: row.assignment_count,
+    currentRequiredDrivers: row.current_required_drivers,
+    newRequiredDrivers: row.new_required_drivers,
+    wouldBeOverassigned: row.would_be_overassigned,
+    timeWouldChange: row.time_would_change,
+  };
+}
+
+export function mapApplyTemplateRefreshResult(row: ApplyTemplateRefreshRow): ApplyTemplateRefreshResult {
+  return {
+    updatedCount: row.updated_count,
+    overassignedCount: row.overassigned_count,
+    overassignedShiftInstanceIds: row.overassigned_shift_instance_ids ?? [],
+    reopenedSubmissionCount: row.reopened_submission_count,
+  };
+}
+
+export function mapTemplateCancellationPreviewRow(row: TemplateCancellationPreviewDbRow): TemplateCancellationPreviewRow {
+  return {
+    shiftInstanceId: row.shift_instance_id,
+    date: row.date,
+    shiftTypeId: row.shift_type_id,
+    shiftKey: row.shift_key,
+    name: row.name,
+    isPublished: row.is_published,
+    assignmentCount: row.assignment_count,
+    hasAvailabilityAnswers: row.has_availability_answers,
+    hasAttendance: row.has_attendance,
+    isSafeToCancel: row.is_safe_to_cancel,
+  };
+}
+
+export function mapApplyTemplateCancellationResult(row: ApplyTemplateCancellationRow): ApplyTemplateCancellationResult {
+  return {
+    cancelledCount: row.cancelled_count,
+    cancelledShiftInstanceIds: row.cancelled_shift_instance_ids ?? [],
   };
 }

@@ -1,9 +1,27 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../types/database.generated';
 import type { ShiftConfigurationRepository } from '../types';
-import type { ShiftInstanceRecord, ShiftTemplateRecord, ShiftTypeRecord } from '../domain';
+import type {
+  ApplyTemplateCancellationResult,
+  ApplyTemplateRefreshResult,
+  MaterialiseShiftsResult,
+  ShiftInstanceRecord,
+  ShiftTemplateRecord,
+  ShiftTypeRecord,
+  TemplateCancellationPreviewRow,
+  TemplateRefreshPreviewRow,
+} from '../domain';
 import { unwrap } from '../errors';
-import { mapShiftInstance, mapShiftTemplate, mapShiftType } from './mappers';
+import {
+  mapApplyTemplateCancellationResult,
+  mapApplyTemplateRefreshResult,
+  mapMaterialiseShiftsResult,
+  mapShiftInstance,
+  mapShiftTemplate,
+  mapShiftType,
+  mapTemplateCancellationPreviewRow,
+  mapTemplateRefreshPreviewRow,
+} from './mappers';
 
 export class SupabaseShiftConfigurationRepository implements ShiftConfigurationRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
@@ -118,5 +136,49 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
         .select('*')
     );
     return mapShiftTemplate(rows[0]);
+  }
+
+  async materialiseShifts(resortId: string, fromDate?: string, toDate?: string): Promise<MaterialiseShiftsResult> {
+    const rows = await unwrap(
+      'shiftConfiguration.materialiseShifts',
+      this.client.rpc('materialise_shift_instances', { p_resort_id: resortId, p_from_date: fromDate, p_to_date: toDate })
+    );
+    return mapMaterialiseShiftsResult(rows[0]);
+  }
+
+  async previewTemplateRefresh(resortId: string, fromDate?: string): Promise<TemplateRefreshPreviewRow[]> {
+    const rows = await unwrap(
+      'shiftConfiguration.previewTemplateRefresh',
+      this.client.rpc('preview_template_refresh', { p_resort_id: resortId, p_from_date: fromDate })
+    );
+    return rows.map(mapTemplateRefreshPreviewRow);
+  }
+
+  async applyTemplateRefresh(resortId: string, fromDate?: string): Promise<ApplyTemplateRefreshResult> {
+    const rows = await unwrap(
+      'shiftConfiguration.applyTemplateRefresh',
+      this.client.rpc('apply_template_refresh', { p_resort_id: resortId, p_from_date: fromDate })
+    );
+    return mapApplyTemplateRefreshResult(rows[0]);
+  }
+
+  async previewTemplateCancellation(resortId: string, shiftTypeId?: string): Promise<TemplateCancellationPreviewRow[]> {
+    const rows = await unwrap(
+      'shiftConfiguration.previewTemplateCancellation',
+      this.client.rpc('preview_template_cancellation', { p_resort_id: resortId, p_shift_type_id: shiftTypeId })
+    );
+    return rows.map(mapTemplateCancellationPreviewRow);
+  }
+
+  async applyTemplateCancellation(
+    resortId: string,
+    shiftTypeId?: string,
+    reason?: string
+  ): Promise<ApplyTemplateCancellationResult> {
+    const rows = await unwrap(
+      'shiftConfiguration.applyTemplateCancellation',
+      this.client.rpc('apply_template_cancellation', { p_resort_id: resortId, p_shift_type_id: shiftTypeId, p_reason: reason })
+    );
+    return mapApplyTemplateCancellationResult(rows[0]);
   }
 }

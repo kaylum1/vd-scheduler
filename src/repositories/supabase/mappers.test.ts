@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  mapApplyTemplateCancellationResult,
+  mapApplyTemplateRefreshResult,
   mapAvailability,
   mapConfirmWeekOutcome,
   mapDriver,
   mapDriverVisibleAssignment,
   mapDriverVisibleShift,
+  mapMaterialiseShiftsResult,
   mapReopenWeekOutcome,
   mapResort,
   mapShiftInstance,
+  mapTemplateCancellationPreviewRow,
+  mapTemplateRefreshPreviewRow,
   mapWeekAvailabilityStatus,
 } from './mappers';
 
@@ -223,5 +228,75 @@ describe('RPC response mapping', () => {
     });
     expect(mapped.result).toBe('reopened');
     expect(mapped.reopenedReason).toBe('driver_reopened');
+  });
+});
+
+describe('Stage 2C RPC response mapping', () => {
+  it('maps materialise_shift_instances()', () => {
+    const mapped = mapMaterialiseShiftsResult({
+      created_count: 5,
+      skipped_existing_count: 2,
+      from_date: '2024-01-01',
+      to_date: '2024-02-29',
+    });
+    expect(mapped).toEqual({ createdCount: 5, skippedExistingCount: 2, fromDate: '2024-01-01', toDate: '2024-02-29' });
+  });
+
+  it('maps a preview_template_refresh() row, including the changed_fields diff', () => {
+    const mapped = mapTemplateRefreshPreviewRow({
+      shift_instance_id: 's1',
+      date: '2024-01-01',
+      shift_type_id: 'st1',
+      shift_key: 'dinner',
+      name: 'Dinner',
+      current_template_id: 't1',
+      new_template_id: 't2',
+      will_change: true,
+      changed_fields: { start_time: { old: '18:00', new: '18:30' } },
+      assignment_count: 2,
+      current_required_drivers: 2,
+      new_required_drivers: 1,
+      would_be_overassigned: true,
+      time_would_change: true,
+    });
+    expect(mapped.willChange).toBe(true);
+    expect(mapped.changedFields).toEqual({ start_time: { old: '18:00', new: '18:30' } });
+    expect(mapped.wouldBeOverassigned).toBe(true);
+  });
+
+  it('maps apply_template_refresh(), defaulting a null overassigned id array to []', () => {
+    const mapped = mapApplyTemplateRefreshResult({
+      updated_count: 3,
+      overassigned_count: 0,
+      overassigned_shift_instance_ids: null as unknown as string[],
+      reopened_submission_count: 1,
+    });
+    expect(mapped.overassignedShiftInstanceIds).toEqual([]);
+    expect(mapped.reopenedSubmissionCount).toBe(1);
+  });
+
+  it('maps a preview_template_cancellation() row', () => {
+    const mapped = mapTemplateCancellationPreviewRow({
+      shift_instance_id: 's1',
+      date: '2024-01-01',
+      shift_type_id: 'st1',
+      shift_key: 'dinner',
+      name: 'Dinner',
+      is_published: false,
+      assignment_count: 0,
+      has_availability_answers: false,
+      has_attendance: false,
+      is_safe_to_cancel: true,
+    });
+    expect(mapped.isSafeToCancel).toBe(true);
+    expect(mapped.isPublished).toBe(false);
+  });
+
+  it('maps apply_template_cancellation()', () => {
+    const mapped = mapApplyTemplateCancellationResult({
+      cancelled_count: 2,
+      cancelled_shift_instance_ids: ['s1', 's2'],
+    });
+    expect(mapped).toEqual({ cancelledCount: 2, cancelledShiftInstanceIds: ['s1', 's2'] });
   });
 });

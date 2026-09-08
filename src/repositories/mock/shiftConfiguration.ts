@@ -1,8 +1,34 @@
 import type { ShiftConfigurationRepository } from '../types';
-import type { ShiftInstanceRecord, ShiftTemplateRecord, ShiftTypeRecord } from '../domain';
+import type {
+  ApplyTemplateCancellationResult,
+  ApplyTemplateRefreshResult,
+  MaterialiseShiftsResult,
+  ShiftInstanceRecord,
+  ShiftTemplateRecord,
+  ShiftTypeRecord,
+  TemplateCancellationPreviewRow,
+  TemplateRefreshPreviewRow,
+} from '../domain';
 import { RepositoryError } from '../errors';
 import { mockShiftTemplates, mockShiftTypes, nextMockShiftTemplateId, nextMockShiftTypeId } from './fixtures';
 import { generateMockShiftInstancesForWeek } from './shiftInstances';
+
+/**
+ * Materialisation/template-refresh/cancellation are manager-console-grade
+ * operations (governing-template resolution across a date range, safety-
+ * gated snapshot diffing, audit-linked cancellation) that only mean
+ * anything against the real database functions — see Stage 2C. Faking a
+ * second implementation of that logic here would be exactly the kind of
+ * DB-logic duplication the Supabase repository is required to avoid, just
+ * moved to the mock side instead of solving the problem. Since nothing
+ * consumes these yet (not wired into Configuration UI), a clear "not
+ * supported" error is more honest than a shallow, untested simulation —
+ * consistent with how MockAuthService.signIn() throws for operations mock
+ * mode has no real equivalent for.
+ */
+function notSupportedInMockMode(operation: string): never {
+  throw new RepositoryError(`${operation} is not supported in mock mode — use VITE_DATA_PROVIDER=supabase.`, { operation });
+}
 
 export class MockShiftConfigurationRepository implements ShiftConfigurationRepository {
   async listShiftTypes(resortId: string): Promise<ShiftTypeRecord[]> {
@@ -74,5 +100,29 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
     template.effectiveTo = effectiveTo;
     template.isActive = false;
     return template;
+  }
+
+  async materialiseShifts(_resortId: string, _fromDate?: string, _toDate?: string): Promise<MaterialiseShiftsResult> {
+    notSupportedInMockMode('shiftConfiguration.materialiseShifts');
+  }
+
+  async previewTemplateRefresh(_resortId: string, _fromDate?: string): Promise<TemplateRefreshPreviewRow[]> {
+    notSupportedInMockMode('shiftConfiguration.previewTemplateRefresh');
+  }
+
+  async applyTemplateRefresh(_resortId: string, _fromDate?: string): Promise<ApplyTemplateRefreshResult> {
+    notSupportedInMockMode('shiftConfiguration.applyTemplateRefresh');
+  }
+
+  async previewTemplateCancellation(_resortId: string, _shiftTypeId?: string): Promise<TemplateCancellationPreviewRow[]> {
+    notSupportedInMockMode('shiftConfiguration.previewTemplateCancellation');
+  }
+
+  async applyTemplateCancellation(
+    _resortId: string,
+    _shiftTypeId?: string,
+    _reason?: string
+  ): Promise<ApplyTemplateCancellationResult> {
+    notSupportedInMockMode('shiftConfiguration.applyTemplateCancellation');
   }
 }

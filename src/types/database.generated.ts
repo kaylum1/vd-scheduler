@@ -162,6 +162,13 @@ export type Database = {
             referencedRelation: "shift_instances"
             referencedColumns: ["id", "resort_id"]
           },
+          {
+            foreignKeyName: "attendance_shift_instance_resort_fk"
+            columns: ["shift_instance_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "v_refreshable_instances"
+            referencedColumns: ["shift_instance_id", "resort_id"]
+          },
         ]
       }
       audit_log: {
@@ -265,6 +272,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "shift_instances"
             referencedColumns: ["id", "resort_id"]
+          },
+          {
+            foreignKeyName: "availability_shift_instance_resort_fk"
+            columns: ["shift_instance_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "v_refreshable_instances"
+            referencedColumns: ["shift_instance_id", "resort_id"]
           },
         ]
       }
@@ -471,6 +485,13 @@ export type Database = {
             referencedColumns: ["id", "resort_id"]
           },
           {
+            foreignKeyName: "payroll_adjustments_shift_instance_resort_fk"
+            columns: ["shift_instance_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "v_refreshable_instances"
+            referencedColumns: ["shift_instance_id", "resort_id"]
+          },
+          {
             foreignKeyName: "payroll_adjustments_voided_by_fkey"
             columns: ["voided_by"]
             isOneToOne: false
@@ -578,6 +599,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "shift_instances"
             referencedColumns: ["id", "resort_id"]
+          },
+          {
+            foreignKeyName: "rota_assignments_shift_instance_resort_fk"
+            columns: ["shift_instance_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "v_refreshable_instances"
+            referencedColumns: ["shift_instance_id", "resort_id"]
           },
         ]
       }
@@ -920,9 +948,81 @@ export type Database = {
           },
         ]
       }
+      v_refreshable_instances: {
+        Row: {
+          current_base_pay_chf: number | null
+          current_delivery_rate_chf: number | null
+          current_end_time: string | null
+          current_is_premium: boolean | null
+          current_name: string | null
+          current_required_drivers: number | null
+          current_sort_order: number | null
+          current_start_time: string | null
+          current_template_id: string | null
+          date: string | null
+          governing_template_id: string | null
+          new_base_pay_chf: number | null
+          new_delivery_rate_chf: number | null
+          new_end_time: string | null
+          new_is_premium: boolean | null
+          new_name: string | null
+          new_required_drivers: number | null
+          new_sort_order: number | null
+          new_start_time: string | null
+          resort_id: string | null
+          shift_instance_id: string | null
+          shift_key: string | null
+          shift_type_id: string | null
+          week_start: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_instances_resort_id_fkey"
+            columns: ["resort_id"]
+            isOneToOne: false
+            referencedRelation: "resorts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shift_instances_shift_type_resort_fk"
+            columns: ["shift_type_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "shift_types"
+            referencedColumns: ["id", "resort_id"]
+          },
+          {
+            foreignKeyName: "shift_instances_template_shift_type_fk"
+            columns: ["current_template_id", "shift_type_id"]
+            isOneToOne: false
+            referencedRelation: "shift_templates"
+            referencedColumns: ["id", "shift_type_id"]
+          },
+        ]
+      }
     }
     Functions: {
       app_weekday: { Args: { d: string }; Returns: number }
+      apply_template_cancellation: {
+        Args: {
+          p_reason?: string
+          p_resort_id: string
+          p_shift_type_id?: string
+        }
+        Returns: {
+          cancelled_count: number
+          cancelled_shift_instance_ids: string[]
+        }[]
+      }
+      apply_template_refresh: {
+        Args: { p_from_date?: string; p_resort_id: string }
+        Returns: {
+          overassigned_count: number
+          overassigned_shift_instance_ids: string[]
+          reopened_submission_count: number
+          updated_count: number
+        }[]
+      }
+      assert_active_manager: { Args: never; Returns: undefined }
       confirm_availability_week: {
         Args: { p_driver_id: string; p_week_start: string }
         Returns: {
@@ -947,8 +1047,52 @@ export type Database = {
       }
       current_driver_id: { Args: never; Returns: string }
       current_driver_resort_id: { Args: never; Returns: string }
+      end_of_following_month: { Args: { d?: string }; Returns: string }
       is_active_driver: { Args: never; Returns: boolean }
       is_active_manager: { Args: never; Returns: boolean }
+      materialise_shift_instances: {
+        Args: { p_from_date?: string; p_resort_id: string; p_to_date?: string }
+        Returns: {
+          created_count: number
+          from_date: string
+          skipped_existing_count: number
+          to_date: string
+        }[]
+      }
+      preview_template_cancellation: {
+        Args: { p_resort_id: string; p_shift_type_id?: string }
+        Returns: {
+          assignment_count: number
+          date: string
+          has_attendance: boolean
+          has_availability_answers: boolean
+          is_published: boolean
+          is_safe_to_cancel: boolean
+          name: string
+          shift_instance_id: string
+          shift_key: string
+          shift_type_id: string
+        }[]
+      }
+      preview_template_refresh: {
+        Args: { p_from_date?: string; p_resort_id: string }
+        Returns: {
+          assignment_count: number
+          changed_fields: Json
+          current_required_drivers: number
+          current_template_id: string
+          date: string
+          name: string
+          new_required_drivers: number
+          new_template_id: string
+          shift_instance_id: string
+          shift_key: string
+          shift_type_id: string
+          time_would_change: boolean
+          will_change: boolean
+          would_be_overassigned: boolean
+        }[]
+      }
       reopen_availability_week: {
         Args: { p_driver_id: string; p_week_start: string }
         Returns: {

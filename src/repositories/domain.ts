@@ -156,3 +156,68 @@ export interface ReopenWeekOutcome {
   reopenedAt: string | null;
   reopenedReason: string | null;
 }
+
+// ---------------------------------------------------------------------
+// Stage 2C: shift materialisation + template refresh/cancellation.
+// Manager-only. Maps 1:1 onto the corresponding RPC row shapes.
+// ---------------------------------------------------------------------
+
+/** Maps 1:1 onto materialise_shift_instances()'s row shape. */
+export interface MaterialiseShiftsResult {
+  createdCount: number;
+  skippedExistingCount: number;
+  fromDate: string;
+  toDate: string;
+}
+
+/** One field that would change if a template refresh were applied. */
+export interface TemplateRefreshFieldChange {
+  old: unknown;
+  new: unknown;
+}
+
+/** Maps 1:1 onto one row of preview_template_refresh(). */
+export interface TemplateRefreshPreviewRow {
+  shiftInstanceId: string;
+  date: string;
+  shiftTypeId: string;
+  shiftKey: string;
+  name: string;
+  currentTemplateId: string | null;
+  newTemplateId: string;
+  willChange: boolean;
+  changedFields: Record<string, TemplateRefreshFieldChange>;
+  assignmentCount: number;
+  currentRequiredDrivers: number;
+  newRequiredDrivers: number;
+  wouldBeOverassigned: boolean;
+  timeWouldChange: boolean;
+}
+
+/** Maps 1:1 onto apply_template_refresh()'s row shape. */
+export interface ApplyTemplateRefreshResult {
+  updatedCount: number;
+  overassignedCount: number;
+  overassignedShiftInstanceIds: string[];
+  reopenedSubmissionCount: number;
+}
+
+/** Maps 1:1 onto one row of preview_template_cancellation(). */
+export interface TemplateCancellationPreviewRow {
+  shiftInstanceId: string;
+  date: string;
+  shiftTypeId: string;
+  shiftKey: string;
+  name: string;
+  isPublished: boolean;
+  assignmentCount: number;
+  hasAvailabilityAnswers: boolean;
+  hasAttendance: boolean;
+  isSafeToCancel: boolean;
+}
+
+/** Maps 1:1 onto apply_template_cancellation()'s row shape. */
+export interface ApplyTemplateCancellationResult {
+  cancelledCount: number;
+  cancelledShiftInstanceIds: string[];
+}
