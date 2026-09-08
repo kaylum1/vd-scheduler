@@ -48,4 +48,14 @@ export class SupabaseDriverRepository implements DriverRepository {
     );
     return mapDriver(rows[0]);
   }
+
+  async listDriverIdsWithLogin(driverIds?: string[]): Promise<Set<string>> {
+    let query = this.client.from('app_users').select('driver_id').not('driver_id', 'is', null);
+    if (driverIds) {
+      if (driverIds.length === 0) return new Set();
+      query = query.in('driver_id', driverIds);
+    }
+    const rows = await unwrap('drivers.listDriverIdsWithLogin', query);
+    return new Set(rows.map((r) => r.driver_id as string));
+  }
 }

@@ -47,6 +47,24 @@ const TEST_IDENTITIES = [
   },
 ];
 
+// Driver-only fixture (no auth login) -- deliberately left off
+// TEST_IDENTITIES so it isn't given an app_users row, giving the
+// Configuration "Login linked" / "No login" badge a real "No login" case to
+// show locally. Verbier itself is ensured below with no drivers at all, per
+// the Stage 2D Checkpoint 1 local dev-data spec.
+const DRIVER_ONLY_FIXTURES = [{ fullName: 'Tomas', resortSlug: 'zermatt', resortName: 'Zermatt' }];
+const EXTRA_RESORTS = [{ slug: 'verbier', name: 'Verbier' }];
+
+// A couple of starter shift types per resort so Configuration's Shift Types
+// tab isn't empty on a fresh local DB. Verbier is deliberately left with
+// none, as a real empty-state case. Not exhaustive -- managers add more
+// through the Configuration UI itself.
+const SHIFT_TYPE_FIXTURES = [
+  { resortSlug: 'crans-montana', key: 'lunch', name: 'Lunch', sortOrder: 1 },
+  { resortSlug: 'crans-montana', key: 'dinner', name: 'Dinner', sortOrder: 2 },
+  { resortSlug: 'zermatt', key: 'dinner', name: 'Dinner', sortOrder: 1 },
+];
+
 function getSupabaseStatus() {
   const raw = execFileSync('npx', ['supabase', 'status', '-o', 'json'], { encoding: 'utf8' });
   return JSON.parse(raw);
@@ -106,6 +124,24 @@ async function main() {
     resortIdBySlug.set(resortSlug, resortId);
   }
 
+  // 1b. Ensure the remaining resorts exist even with no driver/login tied
+  // to them (Verbier: possibly no drivers, per the Stage 2D dev-data spec).
+  for (const { slug, name } of EXTRA_RESORTS) {
+    if (resortIdBySlug.has(slug)) continue;
+    const existing = await adminFetch(`/rest/v1/resorts?slug=eq.${slug}&select=id`);
+    let resortId = existing[0]?.id;
+    if (!resortId) {
+      const created = await adminFetch('/rest/v1/resorts', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ slug, name }),
+      });
+      resortId = created[0].id;
+      console.log(`Created resort ${name} (${resortId})`);
+    }
+    resortIdBySlug.set(slug, resortId);
+  }
+
   // 2. Ensure each auth user + driver + app_users link exists.
   const { users: existingAuthUsers } = await adminFetch('/auth/v1/admin/users?per_page=200');
 
@@ -153,9 +189,48 @@ async function main() {
     }
   }
 
+  // 3. Ensure driver-only fixtures exist (no auth user, no app_users row --
+  // deliberately: this is what gives the "No login" badge a real case).
+  for (const fixture of DRIVER_ONLY_FIXTURES) {
+    const resortId = resortIdBySlug.get(fixture.resortSlug);
+    const existingDrivers = await adminFetch(
+      `/rest/v1/drivers?resort_id=eq.${resortId}&full_name=eq.${encodeURIComponent(fixture.fullName)}&select=id`
+    );
+    if (existingDrivers[0]) {
+      console.log(`Driver-only fixture ${fixture.fullName} already exists (${existingDrivers[0].id})`);
+    } else {
+      const created = await adminFetch('/rest/v1/drivers', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ resort_id: resortId, full_name: fixture.fullName }),
+      });
+      console.log(`Created driver-only fixture ${fixture.fullName} (${created[0].id}, no login)`);
+    }
+  }
+
+  // 4. Ensure starter shift types exist (idempotent, keyed by resort+key).
+  for (const fixture of SHIFT_TYPE_FIXTURES) {
+    const resortId = resortIdBySlug.get(fixture.resortSlug);
+    const existing = await adminFetch(`/rest/v1/shift_types?resort_id=eq.${resortId}&key=eq.${fixture.key}&select=id`);
+    if (existing[0]) {
+      console.log(`Shift type ${fixture.name} (${fixture.resortSlug}) already exists (${existing[0].id})`);
+    } else {
+      const created = await adminFetch('/rest/v1/shift_types', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ resort_id: resortId, key: fixture.key, name: fixture.name, sort_order: fixture.sortOrder }),
+      });
+      console.log(`Created shift type ${fixture.name} (${fixture.resortSlug}, ${created[0].id})`);
+    }
+  }
+
   console.log(`\nLocal test identities ready. Password for all: ${LOCAL_TEST_PASSWORD}`);
   for (const identity of TEST_IDENTITIES) {
     console.log(`  ${identity.role.padEnd(7)} ${identity.email}`);
+  }
+  console.log(`\nDriver-only fixtures (no login):`);
+  for (const fixture of DRIVER_ONLY_FIXTURES) {
+    console.log(`  ${fixture.fullName} (${fixture.resortName})`);
   }
 }
 

@@ -32,11 +32,16 @@ function notSupportedInMockMode(operation: string): never {
 
 export class MockShiftConfigurationRepository implements ShiftConfigurationRepository {
   async listShiftTypes(resortId: string): Promise<ShiftTypeRecord[]> {
-    return mockShiftTypes.filter((t) => t.resortId === resortId);
+    // Shallow copies, not the live fixture objects — rename/reorder/
+    // deactivate mutate mockShiftTypes entries in place, and a consumer
+    // relying on TanStack Query's structural sharing needs genuinely new
+    // objects to detect a change between fetches (see the identical note on
+    // MockDriverRepository.listDrivers).
+    return mockShiftTypes.filter((t) => t.resortId === resortId).map((t) => ({ ...t }));
   }
 
   async listShiftTemplates(shiftTypeId: string): Promise<ShiftTemplateRecord[]> {
-    return mockShiftTemplates.filter((t) => t.shiftTypeId === shiftTypeId);
+    return mockShiftTemplates.filter((t) => t.shiftTypeId === shiftTypeId).map((t) => ({ ...t }));
   }
 
   async listShiftInstances(params: { resortId: string; weekStart: string }): Promise<ShiftInstanceRecord[]> {
@@ -44,23 +49,49 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
   }
 
   async createShiftType(input: { resortId: string; key: string; name: string; sortOrder: number }): Promise<ShiftTypeRecord> {
+    // Mirrors shift_types_resort_key_unique (migration 05) so mock mode
+    // rejects the same case the real database would, rather than silently
+    // allowing two shift types with the same key at one resort.
+    const duplicate = mockShiftTypes.some((t) => t.resortId === input.resortId && t.key === input.key);
+    if (duplicate) {
+      throw new RepositoryError(`shift type key "${input.key}" already exists at this resort`, {
+        operation: 'shiftConfiguration.createShiftType',
+        code: '23505',
+      });
+    }
     const record: ShiftTypeRecord = { id: nextMockShiftTypeId(), resortId: input.resortId, key: input.key, name: input.name, sortOrder: input.sortOrder, isActive: true };
     mockShiftTypes.push(record);
-    return record;
+    return { ...record };
   }
 
   async renameShiftType(shiftTypeId: string, name: string): Promise<ShiftTypeRecord> {
     const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId);
     if (!shiftType) throw new RepositoryError(`shift type ${shiftTypeId} not found`, { operation: 'shiftConfiguration.renameShiftType' });
     shiftType.name = name;
-    return shiftType;
+    return { ...shiftType };
+  }
+
+  async reorderShiftType(shiftTypeId: string, sortOrder: number): Promise<ShiftTypeRecord> {
+    const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId);
+    if (!shiftType) throw new RepositoryError(`shift type ${shiftTypeId} not found`, { operation: 'shiftConfiguration.reorderShiftType' });
+    shiftType.sortOrder = sortOrder;
+    return { ...shiftType };
   }
 
   async deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord> {
     const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId);
     if (!shiftType) throw new RepositoryError(`shift type ${shiftTypeId} not found`, { operation: 'shiftConfiguration.deactivateShiftType' });
+    // Mirrors shift_types_prevent_unsafe_deactivation_trg (Stage 2D
+    // Checkpoint 1 guard): never orphan an active recurring template.
+    const activeTemplateCount = mockShiftTemplates.filter((t) => t.shiftTypeId === shiftTypeId && t.isActive).length;
+    if (activeTemplateCount > 0) {
+      throw new RepositoryError(
+        `shift type ${shiftTypeId} has ${activeTemplateCount} active recurring template(s); deactivate those first`,
+        { operation: 'shiftConfiguration.deactivateShiftType', code: '55006' }
+      );
+    }
     shiftType.isActive = false;
-    return shiftType;
+    return { ...shiftType };
   }
 
   async createShiftTemplateVersion(input: {
@@ -91,7 +122,7 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
       isActive: true,
     };
     mockShiftTemplates.push(record);
-    return record;
+    return { ...record };
   }
 
   async deactivateShiftTemplate(templateId: string, effectiveTo: string): Promise<ShiftTemplateRecord> {
@@ -99,7 +130,7 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
     if (!template) throw new RepositoryError(`shift template ${templateId} not found`, { operation: 'shiftConfiguration.deactivateShiftTemplate' });
     template.effectiveTo = effectiveTo;
     template.isActive = false;
-    return template;
+    return { ...template };
   }
 
   async materialiseShifts(_resortId: string, _fromDate?: string, _toDate?: string): Promise<MaterialiseShiftsResult> {

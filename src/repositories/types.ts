@@ -53,6 +53,19 @@ export interface DriverRepository {
   updateDriverName(driverId: string, fullName: string): Promise<DriverRecord>;
   /** Historical-safe: deactivates rather than deletes (Checkpoint 1 invariant). */
   deactivateDriver(driverId: string): Promise<DriverRecord>;
+
+  // Deliberately no "moveDriverResort"-style method: drivers.resort_id is
+  // immutable once set (Stage 2D Checkpoint 1 guard). Moving a driver to a
+  // different resort is "deactivate the old record, create a new one at the
+  // new resort" — never an update, so there is no business operation to name.
+
+  /**
+   * IDs (from `driverIds`, or every driver if omitted) that have a linked
+   * app_users login. Manager-only read (app_users), used only for the
+   * Configuration UI's "Login linked" / "No login" badge — never for
+   * provisioning (see Stage 2B: account creation stays out of the browser).
+   */
+  listDriverIdsWithLogin(driverIds?: string[]): Promise<Set<string>>;
 }
 
 export interface ShiftConfigurationRepository {
@@ -63,6 +76,9 @@ export interface ShiftConfigurationRepository {
 
   createShiftType(input: { resortId: string; key: string; name: string; sortOrder: number }): Promise<ShiftTypeRecord>;
   renameShiftType(shiftTypeId: string, name: string): Promise<ShiftTypeRecord>;
+  /** Display ordering only — never touches `key` or `resort_id`, both immutable after creation (Stage 2D Checkpoint 1 guard). */
+  reorderShiftType(shiftTypeId: string, sortOrder: number): Promise<ShiftTypeRecord>;
+  /** Rejected by the database if any of the shift type's recurring templates are still active — surface that as a manager-facing error, not a workaround. */
   deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord>;
 
   createShiftTemplateVersion(input: {

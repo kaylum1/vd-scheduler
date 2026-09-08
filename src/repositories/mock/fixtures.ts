@@ -25,6 +25,15 @@ export const mockDrivers: DriverRecord[] = [
   { id: 'mock-tomas', resortId: 'mock-zermatt', fullName: 'Tomas', isActive: true },
 ];
 
+/**
+ * Driver IDs with a linked login (mirrors app_users.driver_id in the real
+ * schema), for the Configuration "Login linked" / "No login" badge — see
+ * DriverRepository.listDriverIdsWithLogin. Gianni and Alex have logins,
+ * Tomas doesn't, matching scripts/seed-local-test-users.mjs's local Supabase
+ * fixtures so both providers tell the same demo story.
+ */
+export const mockDriverIdsWithLogin = new Set<string>(['mock-gianni', 'mock-alex']);
+
 export const mockShiftTypes: ShiftTypeRecord[] = [
   { id: 'mock-crans-dinner', resortId: 'mock-crans', key: 'dinner', name: 'Dinner', sortOrder: 1, isActive: true },
   { id: 'mock-zermatt-dinner', resortId: 'mock-zermatt', key: 'dinner', name: 'Dinner', sortOrder: 1, isActive: true },
@@ -88,4 +97,26 @@ let mockShiftTemplateSeq = 0;
 export function nextMockShiftTemplateId(): string {
   mockShiftTemplateSeq += 1;
   return `mock-shift-template-${mockShiftTemplateSeq}`;
+}
+
+// ---------------------------------------------------------------------
+// Test-only reset: mockDrivers/mockShiftTypes/mockShiftTemplates/
+// mockAvailability are shared, mutable module state, so a test that
+// creates/edits/deactivates something leaks into the next test in the same
+// file unless reset. Deep-cloned once at module load, before anything can
+// have mutated them.
+// ---------------------------------------------------------------------
+const BASELINE_DRIVERS: DriverRecord[] = mockDrivers.map((d) => ({ ...d }));
+const BASELINE_SHIFT_TYPES: ShiftTypeRecord[] = mockShiftTypes.map((t) => ({ ...t }));
+const BASELINE_SHIFT_TEMPLATES: ShiftTemplateRecord[] = mockShiftTemplates.map((t) => ({ ...t }));
+
+/** Test-only: restores every mutable fixture array to its module-load baseline. Call from `beforeEach`. */
+export function resetMockFixturesForTesting(): void {
+  mockDrivers.length = 0;
+  mockDrivers.push(...BASELINE_DRIVERS.map((d) => ({ ...d })));
+  mockShiftTypes.length = 0;
+  mockShiftTypes.push(...BASELINE_SHIFT_TYPES.map((t) => ({ ...t })));
+  mockShiftTemplates.length = 0;
+  mockShiftTemplates.push(...BASELINE_SHIFT_TEMPLATES.map((t) => ({ ...t })));
+  mockAvailability.length = 0;
 }

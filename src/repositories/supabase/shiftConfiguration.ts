@@ -85,6 +85,14 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
     return mapShiftType(rows[0]);
   }
 
+  async reorderShiftType(shiftTypeId: string, sortOrder: number): Promise<ShiftTypeRecord> {
+    const rows = await unwrap(
+      'shiftConfiguration.reorderShiftType',
+      this.client.from('shift_types').update({ sort_order: sortOrder }).eq('id', shiftTypeId).select('*')
+    );
+    return mapShiftType(rows[0]);
+  }
+
   async deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord> {
     const rows = await unwrap(
       'shiftConfiguration.deactivateShiftType',
