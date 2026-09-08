@@ -11,7 +11,15 @@
  * In-memory only; mutations reset on page reload.
  */
 
-import type { AvailabilityAnswer, DriverRecord, ResortRecord, ShiftTemplateRecord, ShiftTypeRecord } from '../domain';
+import type {
+  AvailabilityAnswer,
+  DriverOnfleetMappingRecord,
+  DriverRecord,
+  ResortRecord,
+  ShiftTemplateRecord,
+  ShiftTypeRecord,
+  SupportedLanguageRecord,
+} from '../domain';
 
 export const mockResorts: ResortRecord[] = [
   { id: 'mock-crans', slug: 'crans-montana', name: 'Crans-Montana', timezone: 'Europe/Zurich', isActive: true },
@@ -20,9 +28,9 @@ export const mockResorts: ResortRecord[] = [
 ];
 
 export const mockDrivers: DriverRecord[] = [
-  { id: 'mock-gianni', resortId: 'mock-crans', fullName: 'Gianni', isActive: true },
-  { id: 'mock-alex', resortId: 'mock-zermatt', fullName: 'Alex', isActive: true },
-  { id: 'mock-tomas', resortId: 'mock-zermatt', fullName: 'Tomas', isActive: true },
+  { id: 'mock-gianni', resortId: 'mock-crans', fullName: 'Gianni', isActive: true, preferredLanguage: 'en' },
+  { id: 'mock-alex', resortId: 'mock-zermatt', fullName: 'Alex', isActive: true, preferredLanguage: 'fr' },
+  { id: 'mock-tomas', resortId: 'mock-zermatt', fullName: 'Tomas', isActive: true, preferredLanguage: 'en' },
 ];
 
 /**
@@ -33,6 +41,21 @@ export const mockDrivers: DriverRecord[] = [
  * fixtures so both providers tell the same demo story.
  */
 export const mockDriverIdsWithLogin = new Set<string>(['mock-gianni', 'mock-alex']);
+
+/** Mirrors supported_languages — the reference list Configuration's language picker reads from. */
+export const mockSupportedLanguages: SupportedLanguageRecord[] = [
+  { code: 'en', name: 'English' },
+  { code: 'fr', name: 'French' },
+];
+
+/**
+ * Mirrors driver_onfleet_mappings — Gianni has an active mapping, Alex and
+ * Tomas don't, giving the Configuration "Onfleet linked"/"not linked" badge
+ * both cases in mock mode too.
+ */
+export const mockDriverOnfleetMappings: DriverOnfleetMappingRecord[] = [
+  { id: 'mock-onfleet-gianni', driverId: 'mock-gianni', resortId: 'mock-crans', onfleetWorkerId: 'Gianni Rossi', isActive: true },
+];
 
 export const mockShiftTypes: ShiftTypeRecord[] = [
   { id: 'mock-crans-dinner', resortId: 'mock-crans', key: 'dinner', name: 'Dinner', sortOrder: 1, isActive: true },
@@ -99,6 +122,12 @@ export function nextMockShiftTemplateId(): string {
   return `mock-shift-template-${mockShiftTemplateSeq}`;
 }
 
+let mockOnfleetMappingSeq = 0;
+export function nextMockOnfleetMappingId(): string {
+  mockOnfleetMappingSeq += 1;
+  return `mock-onfleet-mapping-${mockOnfleetMappingSeq}`;
+}
+
 // ---------------------------------------------------------------------
 // Test-only reset: mockDrivers/mockShiftTypes/mockShiftTemplates/
 // mockAvailability are shared, mutable module state, so a test that
@@ -109,6 +138,7 @@ export function nextMockShiftTemplateId(): string {
 const BASELINE_DRIVERS: DriverRecord[] = mockDrivers.map((d) => ({ ...d }));
 const BASELINE_SHIFT_TYPES: ShiftTypeRecord[] = mockShiftTypes.map((t) => ({ ...t }));
 const BASELINE_SHIFT_TEMPLATES: ShiftTemplateRecord[] = mockShiftTemplates.map((t) => ({ ...t }));
+const BASELINE_ONFLEET_MAPPINGS: DriverOnfleetMappingRecord[] = mockDriverOnfleetMappings.map((m) => ({ ...m }));
 
 /** Test-only: restores every mutable fixture array to its module-load baseline. Call from `beforeEach`. */
 export function resetMockFixturesForTesting(): void {
@@ -118,5 +148,7 @@ export function resetMockFixturesForTesting(): void {
   mockShiftTypes.push(...BASELINE_SHIFT_TYPES.map((t) => ({ ...t })));
   mockShiftTemplates.length = 0;
   mockShiftTemplates.push(...BASELINE_SHIFT_TEMPLATES.map((t) => ({ ...t })));
+  mockDriverOnfleetMappings.length = 0;
+  mockDriverOnfleetMappings.push(...BASELINE_ONFLEET_MAPPINGS.map((m) => ({ ...m })));
   mockAvailability.length = 0;
 }

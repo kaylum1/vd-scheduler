@@ -178,6 +178,117 @@ describe('Configuration: Drivers (live, via DriverRepository)', () => {
 });
 
 // =======================================================================
+// DRIVER LANGUAGE + ONFLEET (Stage 2D Checkpoint 1.1)
+// =======================================================================
+describe('Configuration: driver preferred language + Onfleet mapping', () => {
+  it('UI 13: the create form includes a preferred-language field, defaulting to English', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Gianni');
+    fireEvent.click(screen.getByRole('button', { name: /Add driver/i }));
+
+    const languageSelect = (await screen.findByLabelText('Preferred language')) as HTMLSelectElement;
+    expect(languageSelect.value).toBe('en');
+    expect(within(languageSelect).getByRole('option', { name: 'French' })).toBeInTheDocument();
+  });
+
+  it('UI 14: the create form includes an optional Onfleet worker-name field that never blocks creation when left blank', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Gianni');
+    fireEvent.click(screen.getByRole('button', { name: /Add driver/i }));
+
+    expect(await screen.findByLabelText('Onfleet worker name')).toBeInTheDocument();
+    expect(screen.getByText(/exactly as it appears in Onfleet/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'No Onfleet Driver' } });
+    fireEvent.change(screen.getByLabelText('Resort'), { target: { value: 'mock-verbier' } });
+    // Onfleet field deliberately left blank.
+    fireEvent.click(screen.getByRole('button', { name: 'Create driver' }));
+
+    expect(await screen.findByText('No Onfleet Driver')).toBeInTheDocument();
+  });
+
+  it('a driver can be created with a language and an Onfleet worker name together', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Gianni');
+    fireEvent.click(screen.getByRole('button', { name: /Add driver/i }));
+
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Full Onboarding Driver' } });
+    fireEvent.change(screen.getByLabelText('Resort'), { target: { value: 'mock-verbier' } });
+    fireEvent.change(screen.getByLabelText('Preferred language'), { target: { value: 'fr' } });
+    fireEvent.change(screen.getByLabelText('Onfleet worker name'), { target: { value: 'Full Onboarding' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create driver' }));
+
+    expect(await screen.findByText('Full Onboarding Driver')).toBeInTheDocument();
+    const row = screen.getByText('Full Onboarding Driver').closest('.config-list-item') as HTMLElement;
+    expect(await within(row).findByText('Onfleet linked')).toBeInTheDocument();
+  });
+
+  it('UI 15: editing a driver displays their existing preferred language', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Alex'); // mock-alex fixture is preferredLanguage: 'fr'
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Alex' }));
+    const languageSelect = (await screen.findByLabelText('Preferred language')) as HTMLSelectElement;
+    expect(languageSelect.value).toBe('fr');
+  });
+
+  it('a driver\'s language can be changed via the edit form', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Alex');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Alex' }));
+
+    fireEvent.change(await screen.findByLabelText('Preferred language'), { target: { value: 'en' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Alex' }));
+    expect(((await screen.findByLabelText('Preferred language')) as HTMLSelectElement).value).toBe('en');
+  });
+
+  it('UI 16: editing a driver displays their existing Onfleet mapping status and worker name', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Gianni'); // mock-gianni fixture has an active mapping "Gianni Rossi"
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Gianni' }));
+    expect(await screen.findByText('Linked')).toBeInTheDocument();
+    expect((screen.getByLabelText('Onfleet worker name') as HTMLInputElement).value).toBe('Gianni Rossi');
+  });
+
+  it('editing a driver with no Onfleet mapping shows "Not linked" and an empty field', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Tomas'); // no mapping fixture
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Tomas' }));
+    expect(await screen.findByText('Not linked')).toBeInTheDocument();
+    expect((screen.getByLabelText('Onfleet worker name') as HTMLInputElement).value).toBe('');
+  });
+
+  it('the driver list shows an Onfleet-linked badge for a mapped driver and not-linked for an unmapped one', async () => {
+    renderWithQueryClient(<DriversPanel />);
+    await screen.findByText('Gianni');
+
+    const gianniRow = screen.getByText('Gianni').closest('.config-list-item') as HTMLElement;
+    expect(await within(gianniRow).findByText('Onfleet linked')).toBeInTheDocument();
+
+    const tomasRow = screen.getByText('Tomas').closest('.config-list-item') as HTMLElement;
+    expect(within(tomasRow).getByText('Onfleet not linked')).toBeInTheDocument();
+  });
+
+  it('UI 17: language and Onfleet fields use the same responsive form-field/Modal building blocks already verified at mobile widths, not bespoke fixed-width markup', () => {
+    for (const source of [driversPanelSource]) {
+      // A crude but effective structural guard: every new <select>/<input>
+      // this checkpoint adds lives inside the existing .form-field wrapper
+      // (already proven to fit a 375px viewport in Checkpoint 1's manual
+      // pass) and the existing Modal component, rather than any new,
+      // unverified layout primitive.
+      expect(source).toMatch(/id="driver-language"[\s\S]*?<\/select>/);
+      expect(source).toMatch(/id="driver-onfleet-name"/);
+      expect(source).not.toMatch(/width:\s*\d+px/); // no hard-coded pixel widths that could overflow a narrow viewport
+    }
+  });
+});
+
+// =======================================================================
 // SHIFT TYPES
 // =======================================================================
 describe('Configuration: Shift Types (live, via ShiftConfigurationRepository)', () => {

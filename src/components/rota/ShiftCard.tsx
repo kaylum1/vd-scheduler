@@ -82,6 +82,14 @@ export function ShiftCard({
   );
 }
 
+/**
+ * The neutral "no shift scheduled" cell — deliberately distinct from
+ * ShiftCard's red/uncovered state (see docs/business-rules.md §A). Render
+ * this whenever a day/row has no shift_instance at all; never render a
+ * ShiftCard with filled=0 to represent "nothing scheduled" — that's what
+ * "0 assigned drivers on a real shift" (a genuine coverage problem) looks
+ * like, and the two must never be visually or semantically confused.
+ */
 export function EmptyShiftCell() {
   return <div className="shift-cell-empty" aria-hidden="true" />;
 }

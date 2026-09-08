@@ -35,6 +35,11 @@ below — no backend, no login. To run it against the real local Supabase
 backend and real authentication instead, see
 [`docs/local-auth-setup.md`](docs/local-auth-setup.md).
 
+Durable product/business-rule decisions (the kind not derivable from code
+alone — coverage-state semantics, Onfleet mapping, published-rota override,
+driver language, future modules) live in
+[`docs/business-rules.md`](docs/business-rules.md).
+
 ## Project structure
 
 ```

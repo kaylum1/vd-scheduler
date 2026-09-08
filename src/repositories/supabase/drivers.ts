@@ -1,9 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../types/database.generated';
 import type { DriverRepository } from '../types';
-import type { DriverRecord } from '../domain';
+import type { DriverOnfleetMappingRecord, DriverRecord, SupportedLanguageRecord } from '../domain';
 import { unwrap } from '../errors';
-import { mapDriver } from './mappers';
+import { mapDriver, mapDriverOnfleetMapping, mapSupportedLanguage } from './mappers';
 
 export class SupabaseDriverRepository implements DriverRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
@@ -22,12 +22,16 @@ export class SupabaseDriverRepository implements DriverRepository {
     return rows[0] ? mapDriver(rows[0]) : null;
   }
 
-  async createDriver(input: { resortId: string; fullName: string }): Promise<DriverRecord> {
+  async createDriver(input: { resortId: string; fullName: string; preferredLanguage?: string }): Promise<DriverRecord> {
     const rows = await unwrap(
       'drivers.create',
       this.client
         .from('drivers')
-        .insert({ resort_id: input.resortId, full_name: input.fullName })
+        .insert({
+          resort_id: input.resortId,
+          full_name: input.fullName,
+          ...(input.preferredLanguage ? { preferred_language: input.preferredLanguage } : {}),
+        })
         .select('*')
     );
     return mapDriver(rows[0]);
@@ -37,6 +41,14 @@ export class SupabaseDriverRepository implements DriverRepository {
     const rows = await unwrap(
       'drivers.updateName',
       this.client.from('drivers').update({ full_name: fullName }).eq('id', driverId).select('*')
+    );
+    return mapDriver(rows[0]);
+  }
+
+  async updateDriverLanguage(driverId: string, preferredLanguage: string): Promise<DriverRecord> {
+    const rows = await unwrap(
+      'drivers.updateLanguage',
+      this.client.from('drivers').update({ preferred_language: preferredLanguage }).eq('id', driverId).select('*')
     );
     return mapDriver(rows[0]);
   }
@@ -57,5 +69,31 @@ export class SupabaseDriverRepository implements DriverRepository {
     }
     const rows = await unwrap('drivers.listDriverIdsWithLogin', query);
     return new Set(rows.map((r) => r.driver_id as string));
+  }
+
+  async listSupportedLanguages(): Promise<SupportedLanguageRecord[]> {
+    const rows = await unwrap(
+      'drivers.listSupportedLanguages',
+      this.client.from('supported_languages').select('*').order('code', { ascending: true })
+    );
+    return rows.map(mapSupportedLanguage);
+  }
+
+  async listActiveOnfleetMappings(driverIds?: string[]): Promise<Map<string, DriverOnfleetMappingRecord>> {
+    let query = this.client.from('driver_onfleet_mappings').select('*').eq('is_active', true);
+    if (driverIds) {
+      if (driverIds.length === 0) return new Map();
+      query = query.in('driver_id', driverIds);
+    }
+    const rows = await unwrap('drivers.listActiveOnfleetMappings', query);
+    return new Map(rows.map((r) => [r.driver_id, mapDriverOnfleetMapping(r)]));
+  }
+
+  async setOnfleetMapping(driverId: string, onfleetWorkerId: string): Promise<DriverOnfleetMappingRecord> {
+    const row = await unwrap(
+      'drivers.setOnfleetMapping',
+      this.client.rpc('set_driver_onfleet_mapping', { p_driver_id: driverId, p_onfleet_worker_id: onfleetWorkerId })
+    );
+    return mapDriverOnfleetMapping(row);
   }
 }

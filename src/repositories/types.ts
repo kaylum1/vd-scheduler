@@ -26,6 +26,7 @@ import type {
   AvailabilityAnswer,
   AvailabilityStatus,
   ConfirmWeekOutcome,
+  DriverOnfleetMappingRecord,
   DriverRecord,
   DriverVisibleAssignment,
   DriverVisibleShift,
@@ -35,6 +36,7 @@ import type {
   ShiftInstanceRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
+  SupportedLanguageRecord,
   TemplateCancellationPreviewRow,
   TemplateRefreshPreviewRow,
   WeekAvailabilityStatus,
@@ -49,8 +51,11 @@ export interface DriverRepository {
   listDrivers(params?: { resortId?: string }): Promise<DriverRecord[]>;
   getDriverById(driverId: string): Promise<DriverRecord | null>;
 
-  createDriver(input: { resortId: string; fullName: string }): Promise<DriverRecord>;
+  /** preferredLanguage defaults to 'en' (drivers.preferred_language's own DB default) when omitted. */
+  createDriver(input: { resortId: string; fullName: string; preferredLanguage?: string }): Promise<DriverRecord>;
   updateDriverName(driverId: string, fullName: string): Promise<DriverRecord>;
+  /** Must be a supported_languages.code (e.g. 'en', 'fr') — an unsupported value is rejected by the DB FK, not silently coerced. */
+  updateDriverLanguage(driverId: string, preferredLanguage: string): Promise<DriverRecord>;
   /** Historical-safe: deactivates rather than deletes (Checkpoint 1 invariant). */
   deactivateDriver(driverId: string): Promise<DriverRecord>;
 
@@ -66,6 +71,24 @@ export interface DriverRepository {
    * provisioning (see Stage 2B: account creation stays out of the browser).
    */
   listDriverIdsWithLogin(driverIds?: string[]): Promise<Set<string>>;
+
+  /** V1: 'en' and 'fr'. Read from the DB rather than hard-coded so a later-added language needs no frontend change. */
+  listSupportedLanguages(): Promise<SupportedLanguageRecord[]>;
+
+  /**
+   * Active Onfleet mappings (from `driverIds`, or every driver if omitted),
+   * keyed by driverId — manager-only (driver_onfleet_mappings has no driver
+   * RLS policy at all). Used for the Configuration "Onfleet linked" /
+   * "Onfleet not linked" badge.
+   */
+  listActiveOnfleetMappings(driverIds?: string[]): Promise<Map<string, DriverOnfleetMappingRecord>>;
+  /**
+   * Creates or replaces a driver's active Onfleet mapping in one atomic
+   * operation (deactivates whatever was active, if anything, then creates
+   * the new one) — never a raw update of onfleet_worker_id in place, so the
+   * old identity stays in history rather than being overwritten.
+   */
+  setOnfleetMapping(driverId: string, onfleetWorkerId: string): Promise<DriverOnfleetMappingRecord>;
 }
 
 export interface ShiftConfigurationRepository {

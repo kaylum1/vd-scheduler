@@ -9,10 +9,11 @@ import { InlineNotice } from '../../../components/ui/InlineNotice';
 import { Modal, ConfirmDialog } from '../../../components/ui/Modal';
 import { IconEdit, IconPlus, IconTruck } from '../../../components/ui/icons';
 import { getRepositories } from '../../../repositories';
-import type { DriverRecord, ResortRecord } from '../../../repositories/domain';
+import type { DriverOnfleetMappingRecord, DriverRecord, ResortRecord, SupportedLanguageRecord } from '../../../repositories/domain';
 import { describeConfigurationError } from './errorMessages';
 
 const ALL_RESORTS = 'all';
+const DEFAULT_LANGUAGE = 'en';
 type StatusFilter = 'active' | 'inactive' | 'all';
 
 function initialsOf(fullName: string): string {
@@ -30,7 +31,7 @@ export function DriversPanel() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingDriver, setEditingDriver] = useState<DriverRecord | null>(null);
   const [deactivatingDriver, setDeactivatingDriver] = useState<DriverRecord | null>(null);
-  const [justCreatedName, setJustCreatedName] = useState<string | null>(null);
+  const [justCreatedNotice, setJustCreatedNotice] = useState<{ name: string; onfleetWarning: string | null } | null>(null);
 
   const resortsQuery = useQuery({
     queryKey: ['config', 'resorts'],
@@ -47,6 +48,16 @@ export function DriversPanel() {
     queryFn: () => getRepositories().drivers.listDriverIdsWithLogin(),
   });
 
+  const onfleetQuery = useQuery({
+    queryKey: ['config', 'driverOnfleetMappings'],
+    queryFn: () => getRepositories().drivers.listActiveOnfleetMappings(),
+  });
+
+  const languagesQuery = useQuery({
+    queryKey: ['config', 'supportedLanguages'],
+    queryFn: () => getRepositories().drivers.listSupportedLanguages(),
+  });
+
   const resortById = useMemo(() => {
     const map = new Map<string, ResortRecord>();
     for (const r of resortsQuery.data ?? []) map.set(r.id, r);
@@ -61,6 +72,7 @@ export function DriversPanel() {
   }, [driversQuery.data, statusFilter]);
 
   const invalidateDrivers = () => queryClient.invalidateQueries({ queryKey: ['config', 'drivers'] });
+  const invalidateOnfleet = () => queryClient.invalidateQueries({ queryKey: ['config', 'driverOnfleetMappings'] });
 
   return (
     <Card>
@@ -74,11 +86,14 @@ export function DriversPanel() {
         }
       />
 
-      {justCreatedName && (
-        <div style={{ padding: '12px 18px 0' }}>
-          <InlineNotice tone="success" onDismiss={() => setJustCreatedName(null)}>
-            Driver profile created for {justCreatedName}. Login access is managed separately.
+      {justCreatedNotice && (
+        <div style={{ padding: '12px 18px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <InlineNotice tone="success" onDismiss={() => setJustCreatedNotice(null)}>
+            Driver profile created for {justCreatedNotice.name}. Login access is managed separately.
           </InlineNotice>
+          {justCreatedNotice.onfleetWarning && (
+            <InlineNotice tone="error">Onfleet mapping wasn't saved: {justCreatedNotice.onfleetWarning} You can add it from Edit.</InlineNotice>
+          )}
         </div>
       )}
 
@@ -138,6 +153,11 @@ export function DriversPanel() {
               ) : (
                 <StatusPill tone="grey">No login</StatusPill>
               )}
+              {onfleetQuery.data?.has(driver.id) ? (
+                <StatusPill tone="green">Onfleet linked</StatusPill>
+              ) : (
+                <StatusPill tone="grey">Onfleet not linked</StatusPill>
+              )}
             </div>
             <div className="config-list-item__actions">
               <Button variant="ghost" size="sm" icon aria-label={`Edit ${driver.fullName}`} onClick={() => setEditingDriver(driver)}>
@@ -160,12 +180,14 @@ export function DriversPanel() {
       {showCreate && (
         <CreateDriverModal
           resorts={resortsQuery.data ?? []}
+          languages={languagesQuery.data ?? []}
           defaultResortId={resortFilter !== ALL_RESORTS ? resortFilter : undefined}
           onClose={() => setShowCreate(false)}
-          onCreated={(name) => {
+          onCreated={(name, onfleetWarning) => {
             setShowCreate(false);
-            setJustCreatedName(name);
+            setJustCreatedNotice({ name, onfleetWarning });
             invalidateDrivers();
+            invalidateOnfleet();
           }}
         />
       )}
@@ -174,10 +196,13 @@ export function DriversPanel() {
         <EditDriverModal
           driver={editingDriver}
           resortName={resortById.get(editingDriver.resortId)?.name ?? 'Unknown resort'}
+          languages={languagesQuery.data ?? []}
+          currentOnfleetMapping={onfleetQuery.data?.get(editingDriver.id) ?? null}
           onClose={() => setEditingDriver(null)}
           onSaved={() => {
             setEditingDriver(null);
             invalidateDrivers();
+            invalidateOnfleet();
           }}
         />
       )}
@@ -198,22 +223,40 @@ export function DriversPanel() {
 
 function CreateDriverModal({
   resorts,
+  languages,
   defaultResortId,
   onClose,
   onCreated,
 }: {
   resorts: ResortRecord[];
+  languages: SupportedLanguageRecord[];
   defaultResortId?: string;
   onClose: () => void;
-  onCreated: (fullName: string) => void;
+  onCreated: (fullName: string, onfleetWarning: string | null) => void;
 }) {
   const [fullName, setFullName] = useState('');
   const [resortId, setResortId] = useState(defaultResortId ?? '');
+  const [preferredLanguage, setPreferredLanguage] = useState(DEFAULT_LANGUAGE);
+  const [onfleetName, setOnfleetName] = useState('');
   const [touched, setTouched] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: () => getRepositories().drivers.createDriver({ fullName: fullName.trim(), resortId }),
-    onSuccess: () => onCreated(fullName.trim()),
+    mutationFn: async () => {
+      const driver = await getRepositories().drivers.createDriver({ fullName: fullName.trim(), resortId, preferredLanguage });
+      // Onfleet mapping is optional and never blocks driver creation — if it
+      // fails (e.g. the name is already claimed by another driver), the
+      // driver profile still exists; the manager can add it later from Edit.
+      let onfleetWarning: string | null = null;
+      if (onfleetName.trim()) {
+        try {
+          await getRepositories().drivers.setOnfleetMapping(driver.id, onfleetName.trim());
+        } catch (err) {
+          onfleetWarning = describeConfigurationError(err, 'driver');
+        }
+      }
+      return { driver, onfleetWarning };
+    },
+    onSuccess: ({ driver, onfleetWarning }) => onCreated(driver.fullName, onfleetWarning),
   });
 
   const nameError = touched && !fullName.trim() ? 'Full name is required.' : null;
@@ -270,6 +313,34 @@ function CreateDriverModal({
         {resortError && <span className="form-field__error">{resortError}</span>}
         <span className="form-field__hint">A driver belongs to exactly one resort. This cannot be changed later.</span>
       </div>
+      <div className="form-field">
+        <label htmlFor="driver-language">Preferred language</label>
+        <select id="driver-language" value={preferredLanguage} onChange={(e) => setPreferredLanguage(e.target.value)}>
+          {(languages.length ? languages : [{ code: 'en', name: 'English' }]).map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="config-form-section">
+        <div className="config-form-section__title">Onfleet (optional)</div>
+        <div className="form-field">
+          <label htmlFor="driver-onfleet-name">Onfleet worker name</label>
+          <input
+            id="driver-onfleet-name"
+            type="text"
+            value={onfleetName}
+            onChange={(e) => setOnfleetName(e.target.value)}
+            placeholder="e.g. Gianni Rossi"
+          />
+          <span className="form-field__hint">
+            Enter the name exactly as it appears in Onfleet — this is used to match delivery records to this driver.
+            You can leave this blank and add it later.
+          </span>
+        </div>
+      </div>
     </Modal>
   );
 }
@@ -277,18 +348,36 @@ function CreateDriverModal({
 function EditDriverModal({
   driver,
   resortName,
+  languages,
+  currentOnfleetMapping,
   onClose,
   onSaved,
 }: {
   driver: DriverRecord;
   resortName: string;
+  languages: SupportedLanguageRecord[];
+  currentOnfleetMapping: DriverOnfleetMappingRecord | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [fullName, setFullName] = useState(driver.fullName);
+  const [preferredLanguage, setPreferredLanguage] = useState(driver.preferredLanguage);
+  const [onfleetName, setOnfleetName] = useState(currentOnfleetMapping?.onfleetWorkerId ?? '');
 
   const mutation = useMutation({
-    mutationFn: () => getRepositories().drivers.updateDriverName(driver.id, fullName.trim()),
+    mutationFn: async () => {
+      const repo = getRepositories().drivers;
+      if (fullName.trim() !== driver.fullName) {
+        await repo.updateDriverName(driver.id, fullName.trim());
+      }
+      if (preferredLanguage !== driver.preferredLanguage) {
+        await repo.updateDriverLanguage(driver.id, preferredLanguage);
+      }
+      const trimmedOnfleet = onfleetName.trim();
+      if (trimmedOnfleet && trimmedOnfleet !== currentOnfleetMapping?.onfleetWorkerId) {
+        await repo.setOnfleetMapping(driver.id, trimmedOnfleet);
+      }
+    },
     onSuccess: onSaved,
   });
 
@@ -321,6 +410,41 @@ function EditDriverModal({
           A driver's resort can't be changed here. To move {driver.fullName} to a different resort, deactivate this
           profile and create a new one at the new resort.
         </span>
+      </div>
+      <div className="form-field">
+        <label htmlFor="edit-driver-language">Preferred language</label>
+        <select id="edit-driver-language" value={preferredLanguage} onChange={(e) => setPreferredLanguage(e.target.value)}>
+          {(languages.length ? languages : [{ code: driver.preferredLanguage, name: driver.preferredLanguage }]).map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="config-form-section">
+        <div className="config-form-section__title">
+          Onfleet{' '}
+          {currentOnfleetMapping ? (
+            <StatusPill tone="green">Linked</StatusPill>
+          ) : (
+            <StatusPill tone="grey">Not linked</StatusPill>
+          )}
+        </div>
+        <div className="form-field">
+          <label htmlFor="edit-driver-onfleet-name">Onfleet worker name</label>
+          <input
+            id="edit-driver-onfleet-name"
+            type="text"
+            value={onfleetName}
+            onChange={(e) => setOnfleetName(e.target.value)}
+            placeholder="e.g. Gianni Rossi"
+          />
+          <span className="form-field__hint">
+            Enter the name exactly as it appears in Onfleet — this is used to match delivery records to this driver.
+            {currentOnfleetMapping && ' Changing this replaces the current mapping; the previous one is kept as history.'}
+          </span>
+        </div>
       </div>
     </Modal>
   );

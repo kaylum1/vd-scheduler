@@ -373,6 +373,7 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean
+          preferred_language: string
           resort_id: string
           updated_at: string
         }
@@ -381,6 +382,7 @@ export type Database = {
           full_name: string
           id?: string
           is_active?: boolean
+          preferred_language?: string
           resort_id: string
           updated_at?: string
         }
@@ -389,10 +391,18 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean
+          preferred_language?: string
           resort_id?: string
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "drivers_preferred_language_fkey"
+            columns: ["preferred_language"]
+            isOneToOne: false
+            referencedRelation: "supported_languages"
+            referencedColumns: ["code"]
+          },
           {
             foreignKeyName: "drivers_resort_id_fkey"
             columns: ["resort_id"]
@@ -867,6 +877,27 @@ export type Database = {
           },
         ]
       }
+      supported_languages: {
+        Row: {
+          code: string
+          created_at: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       driver_visible_assignments: {
@@ -1059,6 +1090,10 @@ export type Database = {
           to_date: string
         }[]
       }
+      operational_today: {
+        Args: { p_at?: string; p_resort_id?: string }
+        Returns: string
+      }
       preview_template_cancellation: {
         Args: { p_resort_id: string; p_shift_type_id?: string }
         Returns: {
@@ -1106,6 +1141,24 @@ export type Database = {
       reopen_stale_submissions: {
         Args: { p_reason: string; p_resort_id: string; p_week_start: string }
         Returns: number
+      }
+      set_driver_onfleet_mapping: {
+        Args: { p_driver_id: string; p_onfleet_worker_id: string }
+        Returns: {
+          created_at: string
+          driver_id: string
+          id: string
+          is_active: boolean
+          onfleet_worker_id: string
+          resort_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "driver_onfleet_mappings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       shift_instance_week_is_published: {
         Args: { p_shift_instance_id: string }

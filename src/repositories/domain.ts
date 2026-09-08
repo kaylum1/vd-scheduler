@@ -28,6 +28,28 @@ export interface DriverRecord {
   resortId: string;
   fullName: string;
   isActive: boolean;
+  /** References supported_languages.code. Authoritative for driver-UI localisation from Stage 3 onward. */
+  preferredLanguage: string;
+}
+
+/** Maps 1:1 onto a supported_languages row — the reference list Configuration's language picker reads from. */
+export interface SupportedLanguageRecord {
+  code: string;
+  name: string;
+}
+
+/**
+ * Maps 1:1 onto a driver_onfleet_mappings row. At most one active mapping
+ * per driver (Stage 2D Checkpoint 1.1 guard) — "replacing" a mapping means
+ * the old row becomes inactive and a new one is created, never an update of
+ * onfleet_worker_id in place, so history is retained.
+ */
+export interface DriverOnfleetMappingRecord {
+  id: string;
+  driverId: string;
+  resortId: string;
+  onfleetWorkerId: string;
+  isActive: boolean;
 }
 
 export interface ShiftTypeRecord {

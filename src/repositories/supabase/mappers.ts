@@ -10,6 +10,7 @@ import type {
   ApplyTemplateRefreshResult,
   AvailabilityAnswer,
   ConfirmWeekOutcome,
+  DriverOnfleetMappingRecord,
   DriverRecord,
   DriverVisibleAssignment,
   DriverVisibleShift,
@@ -19,6 +20,7 @@ import type {
   ShiftInstanceRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
+  SupportedLanguageRecord,
   TemplateCancellationPreviewRow,
   TemplateRefreshFieldChange,
   TemplateRefreshPreviewRow,
@@ -27,6 +29,8 @@ import type {
 
 type ResortRow = Database['public']['Tables']['resorts']['Row'];
 type DriverRow = Database['public']['Tables']['drivers']['Row'];
+type SupportedLanguageRow = Database['public']['Tables']['supported_languages']['Row'];
+type DriverOnfleetMappingRow = Database['public']['Tables']['driver_onfleet_mappings']['Row'];
 type ShiftTypeRow = Database['public']['Tables']['shift_types']['Row'];
 type ShiftTemplateRow = Database['public']['Tables']['shift_templates']['Row'];
 type ShiftInstanceRow = Database['public']['Tables']['shift_instances']['Row'];
@@ -57,6 +61,24 @@ export function mapDriver(row: DriverRow): DriverRecord {
     id: row.id,
     resortId: row.resort_id,
     fullName: row.full_name,
+    isActive: row.is_active,
+    preferredLanguage: row.preferred_language,
+  };
+}
+
+export function mapSupportedLanguage(row: SupportedLanguageRow): SupportedLanguageRecord {
+  return {
+    code: row.code,
+    name: row.name,
+  };
+}
+
+export function mapDriverOnfleetMapping(row: DriverOnfleetMappingRow): DriverOnfleetMappingRecord {
+  return {
+    id: row.id,
+    driverId: row.driver_id,
+    resortId: row.resort_id,
+    onfleetWorkerId: row.onfleet_worker_id,
     isActive: row.is_active,
   };
 }

@@ -5,12 +5,14 @@ import {
   mapAvailability,
   mapConfirmWeekOutcome,
   mapDriver,
+  mapDriverOnfleetMapping,
   mapDriverVisibleAssignment,
   mapDriverVisibleShift,
   mapMaterialiseShiftsResult,
   mapReopenWeekOutcome,
   mapResort,
   mapShiftInstance,
+  mapSupportedLanguage,
   mapTemplateCancellationPreviewRow,
   mapTemplateRefreshPreviewRow,
   mapWeekAvailabilityStatus,
@@ -40,10 +42,36 @@ describe('mapDriver', () => {
         resort_id: 'r1',
         full_name: 'Gianni',
         is_active: true,
+        preferred_language: 'en',
         created_at: '',
         updated_at: '',
       })
-    ).toEqual({ id: 'd1', resortId: 'r1', fullName: 'Gianni', isActive: true });
+    ).toEqual({ id: 'd1', resortId: 'r1', fullName: 'Gianni', isActive: true, preferredLanguage: 'en' });
+  });
+});
+
+describe('mapSupportedLanguage', () => {
+  it('maps a supported_languages row', () => {
+    expect(mapSupportedLanguage({ code: 'fr', name: 'French', created_at: '', updated_at: '' })).toEqual({
+      code: 'fr',
+      name: 'French',
+    });
+  });
+});
+
+describe('mapDriverOnfleetMapping', () => {
+  it('maps a driver_onfleet_mappings row', () => {
+    expect(
+      mapDriverOnfleetMapping({
+        id: 'm1',
+        driver_id: 'd1',
+        resort_id: 'r1',
+        onfleet_worker_id: 'Gianni Rossi',
+        is_active: true,
+        created_at: '',
+        updated_at: '',
+      })
+    ).toEqual({ id: 'm1', driverId: 'd1', resortId: 'r1', onfleetWorkerId: 'Gianni Rossi', isActive: true });
   });
 });
 
