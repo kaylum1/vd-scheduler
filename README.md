@@ -40,6 +40,10 @@ alone — coverage-state semantics, Onfleet mapping, published-rota override,
 driver language, future modules) live in
 [`docs/business-rules.md`](docs/business-rules.md).
 
+The persistent backend regression suite (`npm run db:reset:test` then
+`npm run test:db`) is documented in
+[`docs/db-testing.md`](docs/db-testing.md).
+
 ## Project structure
 
 ```

@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "seed:local-users": "node scripts/seed-local-test-users.mjs",
-    "db:types": "supabase gen types typescript --local > src/types/database.generated.ts.tmp && (echo '// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.' && echo '// Regenerate with: npm run db:types' && echo '// Source: local Supabase Postgres schema (npx supabase gen types typescript --local)' && echo '' && cat src/types/database.generated.ts.tmp) > src/types/database.generated.ts && rm src/types/database.generated.ts.tmp"
+    "db:types": "supabase gen types typescript --local > src/types/database.generated.ts.tmp && (echo '// AUTO-GENERATED FILE. DO NOT EDIT BY HAND.' && echo '// Regenerate with: npm run db:types' && echo '// Source: local Supabase Postgres schema (npx supabase gen types typescript --local)' && echo '' && cat src/types/database.generated.ts.tmp) > src/types/database.generated.ts && rm src/types/database.generated.ts.tmp",
+    "db:reset:test": "supabase db reset",
+    "test:db": "node scripts/run-db-tests.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.116.0",
