@@ -213,7 +213,14 @@ describe('RecurringScheduleCard: materialisation', () => {
   it('14/15: "Generate upcoming shifts" calls the repository and shows the result', async () => {
     const spy = vi
       .spyOn(MockShiftConfigurationRepository.prototype, 'materialiseShifts')
-      .mockResolvedValue({ createdCount: 42, skippedExistingCount: 14, fromDate: '2026-01-01', toDate: '2026-02-28' });
+      .mockResolvedValue({
+        createdCount: 42,
+        skippedExistingCount: 14,
+        fromDate: '2026-01-01',
+        toDate: '2026-02-28',
+        missingPayrollRuleCount: 0,
+        missingRotaRuleCount: 0,
+      });
 
     renderWithQueryClient(<RecurringScheduleCard resortId="mock-crans" resortName="Crans-Montana" />);
     await screen.findByText('Dinner');
@@ -227,8 +234,22 @@ describe('RecurringScheduleCard: materialisation', () => {
   it('16: generating twice replaces the notice rather than stacking duplicate banners', async () => {
     const spy = vi
       .spyOn(MockShiftConfigurationRepository.prototype, 'materialiseShifts')
-      .mockResolvedValueOnce({ createdCount: 10, skippedExistingCount: 0, fromDate: '2026-01-01', toDate: '2026-02-28' })
-      .mockResolvedValueOnce({ createdCount: 0, skippedExistingCount: 10, fromDate: '2026-01-01', toDate: '2026-02-28' });
+      .mockResolvedValueOnce({
+        createdCount: 10,
+        skippedExistingCount: 0,
+        fromDate: '2026-01-01',
+        toDate: '2026-02-28',
+        missingPayrollRuleCount: 0,
+        missingRotaRuleCount: 0,
+      })
+      .mockResolvedValueOnce({
+        createdCount: 0,
+        skippedExistingCount: 10,
+        fromDate: '2026-01-01',
+        toDate: '2026-02-28',
+        missingPayrollRuleCount: 0,
+        missingRotaRuleCount: 0,
+      });
 
     renderWithQueryClient(<RecurringScheduleCard resortId="mock-crans" resortName="Crans-Montana" />);
     await screen.findByText('Dinner');
@@ -245,7 +266,12 @@ describe('RecurringScheduleCard: materialisation', () => {
 });
 
 describe('RecurringScheduleCard: review schedule updates (refresh preview/apply)', () => {
-  it('17/19: a pay-only change is listed, with no availability-reopen warning', async () => {
+  // Stage 2D Checkpoint 3 narrowed preview_template_refresh/
+  // apply_template_refresh to schedule-owned fields only (name/sort_order/
+  // start_time/end_time) -- pay/required_drivers/is_premium can no longer
+  // appear in changed_fields at all, so this scenario exercises a real
+  // schedule field (name) instead of the retired base_pay_chf example.
+  it('17/19: a name-only change is listed, with no availability-reopen warning', async () => {
     vi.spyOn(MockShiftConfigurationRepository.prototype, 'previewTemplateRefresh').mockResolvedValue([
       {
         shiftInstanceId: 'si1',
@@ -256,11 +282,8 @@ describe('RecurringScheduleCard: review schedule updates (refresh preview/apply)
         currentTemplateId: 'old-tpl',
         newTemplateId: 'new-tpl',
         willChange: true,
-        changedFields: { base_pay_chf: { old: 30, new: 35 } },
+        changedFields: { name: { old: 'Dinner', new: 'Evening Dinner' } },
         assignmentCount: 1,
-        currentRequiredDrivers: 1,
-        newRequiredDrivers: 1,
-        wouldBeOverassigned: false,
         timeWouldChange: false,
       },
     ]);
@@ -269,7 +292,7 @@ describe('RecurringScheduleCard: review schedule updates (refresh preview/apply)
     await screen.findByText('Dinner');
     fireEvent.click(screen.getByRole('button', { name: 'Review schedule updates' }));
 
-    expect(await screen.findByText(/Base pay: CHF 30\.00 → CHF 35\.00/)).toBeInTheDocument();
+    expect(await screen.findByText(/Name: Dinner → Evening Dinner/)).toBeInTheDocument();
     expect(screen.queryByText(/reopen confirmed driver availability/i)).not.toBeInTheDocument();
   });
 
@@ -286,9 +309,6 @@ describe('RecurringScheduleCard: review schedule updates (refresh preview/apply)
         willChange: true,
         changedFields: { start_time: { old: '18:00', new: '18:30' } },
         assignmentCount: 0,
-        currentRequiredDrivers: 1,
-        newRequiredDrivers: 1,
-        wouldBeOverassigned: false,
         timeWouldChange: true,
       },
     ]);
@@ -300,32 +320,11 @@ describe('RecurringScheduleCard: review schedule updates (refresh preview/apply)
     expect(await screen.findByText(/reopen confirmed driver availability/i)).toBeInTheDocument();
   });
 
-  it('20: an over-assigned consequence is flagged', async () => {
-    vi.spyOn(MockShiftConfigurationRepository.prototype, 'previewTemplateRefresh').mockResolvedValue([
-      {
-        shiftInstanceId: 'si1',
-        date: '2026-02-07',
-        shiftTypeId: 'mock-crans-dinner',
-        shiftKey: 'dinner',
-        name: 'Dinner',
-        currentTemplateId: 'old-tpl',
-        newTemplateId: 'new-tpl',
-        willChange: true,
-        changedFields: { required_drivers: { old: 2, new: 1 } },
-        assignmentCount: 2,
-        currentRequiredDrivers: 2,
-        newRequiredDrivers: 1,
-        wouldBeOverassigned: true,
-        timeWouldChange: false,
-      },
-    ]);
-
-    renderWithQueryClient(<RecurringScheduleCard resortId="mock-crans" resortName="Crans-Montana" />);
-    await screen.findByText('Dinner');
-    fireEvent.click(screen.getByRole('button', { name: 'Review schedule updates' }));
-
-    expect(await screen.findByText(/over-assigned/i)).toBeInTheDocument();
-  });
+  // Test 20 ("an over-assigned consequence is flagged") was removed in
+  // Stage 2D Checkpoint 3: apply_template_refresh no longer touches
+  // required_drivers at all (staffing now belongs to rota_rules_*), so it
+  // can no longer make an instance over-assigned -- there is nothing left
+  // for this scenario to exercise.
 
   it('21: applying the refresh requires an explicit click — it never fires just from opening the preview', async () => {
     vi.spyOn(MockShiftConfigurationRepository.prototype, 'previewTemplateRefresh').mockResolvedValue([
@@ -338,22 +337,19 @@ describe('RecurringScheduleCard: review schedule updates (refresh preview/apply)
         currentTemplateId: 'old-tpl',
         newTemplateId: 'new-tpl',
         willChange: true,
-        changedFields: { base_pay_chf: { old: 30, new: 35 } },
+        changedFields: { name: { old: 'Dinner', new: 'Evening Dinner' } },
         assignmentCount: 0,
-        currentRequiredDrivers: 1,
-        newRequiredDrivers: 1,
-        wouldBeOverassigned: false,
         timeWouldChange: false,
       },
     ]);
     const applySpy = vi
       .spyOn(MockShiftConfigurationRepository.prototype, 'applyTemplateRefresh')
-      .mockResolvedValue({ updatedCount: 1, overassignedCount: 0, overassignedShiftInstanceIds: [], reopenedSubmissionCount: 0 });
+      .mockResolvedValue({ updatedCount: 1, reopenedSubmissionCount: 0 });
 
     renderWithQueryClient(<RecurringScheduleCard resortId="mock-crans" resortName="Crans-Montana" />);
     await screen.findByText('Dinner');
     fireEvent.click(screen.getByRole('button', { name: 'Review schedule updates' }));
-    await screen.findByText(/Base pay/);
+    await screen.findByText(/Name:/);
 
     expect(applySpy).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /Apply to 1 shift/ }));

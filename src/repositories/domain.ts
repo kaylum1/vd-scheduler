@@ -61,6 +61,14 @@ export interface ShiftTypeRecord {
   isActive: boolean;
 }
 
+/**
+ * requiredDrivers/basePayChf/deliveryRateChf/isPremium are DEPRECATED
+ * (Stage 2D Checkpoint 3): staffing now belongs to rota_rules_*, pay to
+ * payroll_rules. Nullable here purely because the DB columns are nullable
+ * -- the current Shift Setup form (Checkpoint 4 will remove this) still
+ * writes real values to them, but materialise_shift_instances no longer
+ * reads them off this table at all.
+ */
 export interface ShiftTemplateRecord {
   id: string;
   resortId: string;
@@ -69,10 +77,10 @@ export interface ShiftTemplateRecord {
   weekday: number;
   startTime: string;
   endTime: string;
-  requiredDrivers: number;
-  basePayChf: number;
-  deliveryRateChf: number;
-  isPremium: boolean;
+  requiredDrivers: number | null;
+  basePayChf: number | null;
+  deliveryRateChf: number | null;
+  isPremium: boolean | null;
   effectiveFrom: string;
   effectiveTo: string | null;
   isActive: boolean;
@@ -82,6 +90,13 @@ export interface ShiftTemplateRecord {
  * Manager-side, full-fidelity shift instance (includes pay/premium/
  * headcount). Never expose this shape to a driver session — that's what
  * DriverVisibleShift is for.
+ *
+ * requiredDrivers/basePayChf/deliveryRateChf/isPremium are nullable as of
+ * Stage 2D Checkpoint 3: NULL means "not configured" (no applicable
+ * payroll_rules/rota_rules_* row at materialisation time) — a distinct
+ * "Needs Attention" state, never coalesced to 0/false. See
+ * coverageTone/coverageLabel in components/ui/StatusPill.tsx and
+ * docs/business-rules.md.
  */
 export interface ShiftInstanceRecord {
   id: string;
@@ -95,10 +110,10 @@ export interface ShiftInstanceRecord {
   sortOrder: number;
   startTime: string;
   endTime: string;
-  requiredDrivers: number;
-  basePayChf: number;
-  deliveryRateChf: number;
-  isPremium: boolean;
+  requiredDrivers: number | null;
+  basePayChf: number | null;
+  deliveryRateChf: number | null;
+  isPremium: boolean | null;
   status: 'active' | 'cancelled';
   origin: 'template' | 'adhoc';
 }
@@ -184,12 +199,19 @@ export interface ReopenWeekOutcome {
 // Manager-only. Maps 1:1 onto the corresponding RPC row shapes.
 // ---------------------------------------------------------------------
 
-/** Maps 1:1 onto materialise_shift_instances()'s row shape. */
+/**
+ * Maps 1:1 onto materialise_shift_instances()'s row shape. The two missing-
+ * rule counts (Stage 2D Checkpoint 3) count shifts materialised over the
+ * requested range with no applicable payroll_rules/rota_rules_* row --
+ * never a failure, always a "Needs Attention" signal.
+ */
 export interface MaterialiseShiftsResult {
   createdCount: number;
   skippedExistingCount: number;
   fromDate: string;
   toDate: string;
+  missingPayrollRuleCount: number;
+  missingRotaRuleCount: number;
 }
 
 /** One field that would change if a template refresh were applied. */
@@ -198,7 +220,13 @@ export interface TemplateRefreshFieldChange {
   new: unknown;
 }
 
-/** Maps 1:1 onto one row of preview_template_refresh(). */
+/**
+ * Maps 1:1 onto one row of preview_template_refresh(). Schedule fields only
+ * as of Stage 2D Checkpoint 3 -- required_drivers/pay/is_premium are no
+ * longer schedule-template concerns (they belong to payroll_rules/
+ * rota_rules_*), so there is no more current/new-required-drivers or
+ * over-assignment projection here at all.
+ */
 export interface TemplateRefreshPreviewRow {
   shiftInstanceId: string;
   date: string;
@@ -210,17 +238,17 @@ export interface TemplateRefreshPreviewRow {
   willChange: boolean;
   changedFields: Record<string, TemplateRefreshFieldChange>;
   assignmentCount: number;
-  currentRequiredDrivers: number;
-  newRequiredDrivers: number;
-  wouldBeOverassigned: boolean;
   timeWouldChange: boolean;
 }
 
-/** Maps 1:1 onto apply_template_refresh()'s row shape. */
+/**
+ * Maps 1:1 onto apply_template_refresh()'s row shape. No more over-assigned
+ * tracking as of Stage 2D Checkpoint 3 -- this action never changes
+ * required_drivers any more, so it can no longer make an instance
+ * over-assigned.
+ */
 export interface ApplyTemplateRefreshResult {
   updatedCount: number;
-  overassignedCount: number;
-  overassignedShiftInstanceIds: string[];
   reopenedSubmissionCount: number;
 }
 

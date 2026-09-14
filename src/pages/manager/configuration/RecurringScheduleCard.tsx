@@ -201,14 +201,20 @@ function ShiftTypeSchedule({ resortId, shiftType }: { resortId: string; shiftTyp
                     <IconClock style={{ width: 11, height: 11, marginRight: 3, verticalAlign: -1 }} />
                     {toHHMM(t.startTime)}–{toHHMM(t.endTime)}
                   </span>
+                  {/* requiredDrivers/basePayChf/deliveryRateChf are nullable
+                      DB-wide since Stage 2D Checkpoint 3 (staffing/pay moved
+                      to rota_rules/payroll_rules) but this form is the only
+                      writer of shift_templates' own copies and always
+                      supplies a real value — the ?? 0 fallback below is
+                      purely for the type, never expected in practice. */}
                   <span>
-                    {t.requiredDrivers} driver{t.requiredDrivers === 1 ? '' : 's'}
+                    {t.requiredDrivers ?? 0} driver{t.requiredDrivers === 1 ? '' : 's'}
                   </span>
                   {t.isPremium && <Badge tone="amber">High-value</Badge>}
                 </div>
                 <div className="schedule-day__row schedule-day__row--muted">
                   <span>
-                    CHF {t.basePayChf.toFixed(2)} base / CHF {t.deliveryRateChf.toFixed(2)} delivery
+                    CHF {(t.basePayChf ?? 0).toFixed(2)} base / CHF {(t.deliveryRateChf ?? 0).toFixed(2)} delivery
                   </span>
                   <span>
                     From {formatIsoDateLong(t.effectiveFrom)}
@@ -617,7 +623,6 @@ function groupRefreshRows(rows: TemplateRefreshPreviewRow[]) {
       changedFields: Record<string, TemplateRefreshFieldChange>;
       dates: string[];
       assignmentCount: number;
-      overassignedCount: number;
       timeWouldChange: boolean;
     }
   >();
@@ -627,14 +632,12 @@ function groupRefreshRows(rows: TemplateRefreshPreviewRow[]) {
     if (existing) {
       existing.dates.push(row.date);
       existing.assignmentCount += row.assignmentCount;
-      if (row.wouldBeOverassigned) existing.overassignedCount += 1;
     } else {
       groups.set(key, {
         name: row.name,
         changedFields: row.changedFields,
         dates: [row.date],
         assignmentCount: row.assignmentCount,
-        overassignedCount: row.wouldBeOverassigned ? 1 : 0,
         timeWouldChange: row.timeWouldChange,
       });
     }
@@ -655,7 +658,6 @@ function RefreshPreviewDialog({ resortId, onClose }: { resortId: string; onClose
     mutationFn: () => getRepositories().shiftConfiguration.applyTemplateRefresh(resortId),
     onSuccess: (result) => {
       const parts = [`${result.updatedCount} shift${result.updatedCount === 1 ? '' : 's'} updated.`];
-      if (result.overassignedCount > 0) parts.push(`${result.overassignedCount} now need${result.overassignedCount === 1 ? 's' : ''} attention (over-assigned).`);
       if (result.reopenedSubmissionCount > 0) {
         parts.push(
           `${result.reopenedSubmissionCount} driver submission${result.reopenedSubmissionCount === 1 ? '' : 's'} reopened due to the time change.`
@@ -670,7 +672,6 @@ function RefreshPreviewDialog({ resortId, onClose }: { resortId: string; onClose
   const changedRows = (previewQuery.data ?? []).filter((r) => r.willChange);
   const groups = useMemo(() => groupRefreshRows(changedRows), [changedRows]);
   const anyTimeChange = changedRows.some((r) => r.timeWouldChange);
-  const anyOverassigned = changedRows.some((r) => r.wouldBeOverassigned);
 
   if (applyNotice) {
     return (
@@ -709,12 +710,6 @@ function RefreshPreviewDialog({ resortId, onClose }: { resortId: string; onClose
               Changing the shift time will reopen confirmed driver availability for the affected week(s).
             </InlineNotice>
           )}
-          {anyOverassigned && (
-            <InlineNotice tone="error">
-              Some shifts would have more drivers assigned than the new headcount allows — assignments are kept, but flagged for
-              your attention.
-            </InlineNotice>
-          )}
           {groups.map((g, i) => {
             const sortedDates = [...g.dates].sort();
             return (
@@ -735,7 +730,6 @@ function RefreshPreviewDialog({ resortId, onClose }: { resortId: string; onClose
                 </ul>
                 <div className="schedule-refresh-group__meta">
                   {g.assignmentCount} draft assignment{g.assignmentCount === 1 ? '' : 's'} kept
-                  {g.overassignedCount > 0 ? ` · ${g.overassignedCount} over-assigned` : ''}
                 </div>
               </div>
             );

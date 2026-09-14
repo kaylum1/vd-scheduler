@@ -260,17 +260,26 @@ describe('RPC response mapping', () => {
 });
 
 describe('Stage 2C RPC response mapping', () => {
-  it('maps materialise_shift_instances()', () => {
+  it('maps materialise_shift_instances(), including the Stage 2D Checkpoint 3 missing-rule counts', () => {
     const mapped = mapMaterialiseShiftsResult({
       created_count: 5,
       skipped_existing_count: 2,
       from_date: '2024-01-01',
       to_date: '2024-02-29',
+      missing_payroll_rule_count: 1,
+      missing_rota_rule_count: 3,
     });
-    expect(mapped).toEqual({ createdCount: 5, skippedExistingCount: 2, fromDate: '2024-01-01', toDate: '2024-02-29' });
+    expect(mapped).toEqual({
+      createdCount: 5,
+      skippedExistingCount: 2,
+      fromDate: '2024-01-01',
+      toDate: '2024-02-29',
+      missingPayrollRuleCount: 1,
+      missingRotaRuleCount: 3,
+    });
   });
 
-  it('maps a preview_template_refresh() row, including the changed_fields diff', () => {
+  it('maps a preview_template_refresh() row, including the changed_fields diff (schedule fields only since Stage 2D Checkpoint 3)', () => {
     const mapped = mapTemplateRefreshPreviewRow({
       shift_instance_id: 's1',
       date: '2024-01-01',
@@ -282,25 +291,18 @@ describe('Stage 2C RPC response mapping', () => {
       will_change: true,
       changed_fields: { start_time: { old: '18:00', new: '18:30' } },
       assignment_count: 2,
-      current_required_drivers: 2,
-      new_required_drivers: 1,
-      would_be_overassigned: true,
       time_would_change: true,
     });
     expect(mapped.willChange).toBe(true);
     expect(mapped.changedFields).toEqual({ start_time: { old: '18:00', new: '18:30' } });
-    expect(mapped.wouldBeOverassigned).toBe(true);
   });
 
-  it('maps apply_template_refresh(), defaulting a null overassigned id array to []', () => {
+  it('maps apply_template_refresh() (no more overassigned tracking since Stage 2D Checkpoint 3)', () => {
     const mapped = mapApplyTemplateRefreshResult({
       updated_count: 3,
-      overassigned_count: 0,
-      overassigned_shift_instance_ids: null as unknown as string[],
       reopened_submission_count: 1,
     });
-    expect(mapped.overassignedShiftInstanceIds).toEqual([]);
-    expect(mapped.reopenedSubmissionCount).toBe(1);
+    expect(mapped).toEqual({ updatedCount: 3, reopenedSubmissionCount: 1 });
   });
 
   it('maps a preview_template_cancellation() row', () => {

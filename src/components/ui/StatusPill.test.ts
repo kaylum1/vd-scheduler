@@ -37,3 +37,28 @@ describe('coverageTone / coverageLabel: uncovered styling requires a real, exist
     expect(coverageTone(0, 0)).toBe('red'); // would be wrong if ever used for "no shift" — callers must not do this
   });
 });
+
+/**
+ * Stage 2D Checkpoint 3, product rule (docs/business-rules.md §A): a real
+ * shift_instance with required_drivers = NULL means "staffing not
+ * configured" (no applicable rota_rules_* row at materialisation time) — a
+ * third, distinct coverage state from both "no service" (no instance at
+ * all) and "uncovered" (a real, configured requirement that isn't met).
+ * Never conflate it with either: it must not read as a red staffing
+ * shortfall, and it must not be silently treated as "0 required".
+ */
+describe('coverageTone / coverageLabel: staffing not configured (required = null)', () => {
+  it('is amber / "Staffing not configured", regardless of how many drivers happen to be assigned', () => {
+    expect(coverageTone(0, null)).toBe('amber');
+    expect(coverageLabel(0, null)).toBe('Staffing not configured');
+  });
+
+  it('stays amber/"Staffing not configured" even when drivers are already assigned', () => {
+    expect(coverageTone(2, null)).toBe('amber');
+    expect(coverageLabel(2, null)).toBe('Staffing not configured');
+  });
+
+  it('is never reported as "uncovered"/red the way an unmet real requirement would be', () => {
+    expect(coverageTone(0, null)).not.toBe('red');
+  });
+});

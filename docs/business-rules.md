@@ -9,9 +9,10 @@ An entry existing here does not imply its UI exists yet — check the
 
 ---
 
-## A. "No shift scheduled" ≠ "uncovered shift"
+## A. Three coverage states — "no service", "staffing not configured", "uncovered"
 
-**Decided:** Stage 2D Checkpoint 1.1.
+**Decided:** Stage 2D Checkpoint 1.1 (states 1 and 3); extended to three
+states in Stage 2D Checkpoint 3 once staffing moved out of Shift Setup.
 
 A calendar date/cell with **no active `shift_instance`** is a normal,
 expected no-service state. It must render as neutral/grey — e.g. "No
@@ -23,28 +24,45 @@ render as:
 - "0/x covered"
 - a closure warning
 
-Red/uncovered styling is reserved for the narrower case: **an active real
-shift exists, and assigned driver count < required_drivers.**
+Since Stage 2D Checkpoint 3, staffing (`required_drivers`) is resolved from
+`rota_rules_default`/`rota_rules_weekday`/`rota_rules_date` at
+materialisation time, and a shift with **no applicable rota rule at all**
+materialises with `required_drivers = NULL` — never a silently-guessed `1`.
+This is a **second, distinct non-error state**, "staffing not configured":
+a real shift exists, but nobody has said yet how many drivers it needs.
+It must render as amber/"Needs Attention" (e.g. "Staffing not configured")
+— **never** as a red "uncovered" shortfall (that would train managers to
+treat a configuration gap as if it were a shift genuinely short-staffed),
+and never as "0 drivers needed" (that would hide a real gap as if it were
+intentional).
 
-| Scenario | Rendering |
-|---|---|
-| No Dinner shift_instance exists Monday | Grey / neutral — "no service" |
-| Dinner exists, required_drivers=1, assignments=0 | Red — "uncovered" |
-| Dinner exists, required_drivers=1, assignments=1 | Green — "covered" |
+Red/uncovered styling is reserved for the narrowest case: **an active real
+shift exists, `required_drivers` is a real configured number, and assigned
+driver count < required_drivers.**
 
-**Why it matters:** conflating the two makes every resort with a lighter
-schedule (or one not yet configured, like a brand-new resort) look like it's
-in a permanent coverage crisis, which is misleading to a manager and would
-train them to ignore real warnings.
+| Scenario | required_drivers | Rendering |
+|---|---|---|
+| No Dinner shift_instance exists Monday | n/a (no row) | Grey / neutral — "no service" |
+| Dinner exists, no rota rule was ever configured | `NULL` | Amber — "Staffing not configured" |
+| Dinner exists, required_drivers=1, assignments=0 | `1` | Red — "uncovered" |
+| Dinner exists, required_drivers=1, assignments=1 | `1` | Green — "covered" |
 
-**Implemented (Checkpoint 1.1 audit):** The relevant presentation code
-already gets this right — no behavioural bug was found, only documentation
-added to make the invariant explicit for future changes:
+**Why it matters:** conflating "no service" with "uncovered" makes every
+resort with a lighter schedule (or one not yet configured, like a brand-new
+resort) look like it's in a permanent coverage crisis. Conflating "staffing
+not configured" with either of the other two either hides a real
+configuration gap (as "no service") or misreports it as an urgent
+under-staffing emergency (as "uncovered") when the actual problem is
+upstream, in Rota Rules — both are misleading to a manager and would train
+them to ignore or misdiagnose real warnings.
+
+**Implemented:**
 
 - [`coverageTone`/`coverageLabel`](../src/components/ui/StatusPill.tsx) —
-  pure functions that render coverage for a shift *already known to exist*
-  (`required` > 0, matching the DB's `required_drivers > 0` check). They are
-  never called for a "no shift" cell.
+  pure functions that render coverage for a shift *already known to exist*.
+  `required: number | null` — `null` (Stage 2D Checkpoint 3) renders
+  amber/"Staffing not configured"; a real number renders red/amber/green as
+  before. Never called for a "no shift" cell.
 - [`ShiftCard` vs `EmptyShiftCell`](../src/components/rota/ShiftCard.tsx) —
   `WeekGrid` renders `ShiftCard` only when a real shift exists for that
   row/day, `EmptyShiftCell` (neutral, dashed border, no text) otherwise.
@@ -55,6 +73,13 @@ added to make the invariant explicit for future changes:
 - [`rotaReadiness`](../src/lib/rotaReadiness.ts)'s `uncoveredShifts` is
   filtered from the resort's actual generated shift instances, never
   inferred from an assumed/expected shift.
+- [`materialise_shift_instances`](../supabase/migrations/20260914160448_payroll_and_rota_rule_foundations.sql) —
+  leaves `shift_instances.required_drivers` (and `base_pay_chf`/
+  `delivery_rate_chf`/`is_premium`) `NULL` whenever no applicable rule
+  exists, and reports how many via `missing_payroll_rule_count`/
+  `missing_rota_rule_count` — never coalesces a missing rule to `0`/`1`/
+  `false`. Nullability itself is the "not configured" signal; no separate
+  status column was added.
 
 Tests: [`StatusPill.test.ts`](../src/components/ui/StatusPill.test.ts),
 [`ShiftCard.test.tsx`](../src/components/rota/ShiftCard.test.tsx).

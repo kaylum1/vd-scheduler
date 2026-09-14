@@ -221,6 +221,8 @@ export function mapMaterialiseShiftsResult(row: MaterialiseShiftsRow): Materiali
     skippedExistingCount: row.skipped_existing_count,
     fromDate: row.from_date,
     toDate: row.to_date,
+    missingPayrollRuleCount: row.missing_payroll_rule_count,
+    missingRotaRuleCount: row.missing_rota_rule_count,
   };
 }
 
@@ -236,9 +238,6 @@ export function mapTemplateRefreshPreviewRow(row: TemplateRefreshPreviewDbRow): 
     willChange: row.will_change,
     changedFields: (row.changed_fields ?? {}) as unknown as Record<string, TemplateRefreshFieldChange>,
     assignmentCount: row.assignment_count,
-    currentRequiredDrivers: row.current_required_drivers,
-    newRequiredDrivers: row.new_required_drivers,
-    wouldBeOverassigned: row.would_be_overassigned,
     timeWouldChange: row.time_would_change,
   };
 }
@@ -246,8 +245,6 @@ export function mapTemplateRefreshPreviewRow(row: TemplateRefreshPreviewDbRow): 
 export function mapApplyTemplateRefreshResult(row: ApplyTemplateRefreshRow): ApplyTemplateRefreshResult {
   return {
     updatedCount: row.updated_count,
-    overassignedCount: row.overassigned_count,
-    overassignedShiftInstanceIds: row.overassigned_shift_instance_ids ?? [],
     reopenedSubmissionCount: row.reopened_submission_count,
   };
 }
