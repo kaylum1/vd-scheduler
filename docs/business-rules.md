@@ -232,3 +232,61 @@ Configuration
 
 **Implemented:** nothing. No page, no navigation entry, no schema. This is
 a roadmap placeholder only, so the requirement isn't lost between sessions.
+
+---
+
+## F. Manager terminology: "Shift", not shift type/template/key
+
+**Decided:** Stage 2D Checkpoint 4.
+
+Managers think and speak in terms of a single object, **"Shift"** (e.g.
+"Dinner", "Lunch") — one name, one standard time window, the set of
+weekdays it runs on, and one effective period. The backend concepts that
+implement this — `shift_types` (stable identity + internal `key`),
+per-weekday `shift_templates` rows, the Monday=0..Sunday=6 weekday integer,
+resort timezone — remain real and necessary, but are never manager-facing
+terminology or fields from Checkpoint 4 onward. The manager-facing Shift
+Setup UI must never show "shift type", "template", "template version",
+"weekday template", "stable key", or a raw weekday integer.
+
+**One shift, one time:** a Shift has exactly one start/end time across
+every weekday it's currently active on. A service that genuinely needs a
+different time on a different day is a **separate** Shift (e.g. "Weekend
+Dinner"), never a per-weekday time on one Shift. The atomic RPCs
+(`create_shift`/`revise_shift`/`reactivate_shift`) enforce this by
+construction — they take one time for the whole weekday selection, so
+there is no way to create per-weekday times through them.
+
+**Legacy inconsistent data — never silently flattened:** the pre-
+Checkpoint-4 UI *did* allow different times on different weekdays of the
+same shift type (it wrote `shift_templates` rows one weekday at a time,
+each with its own time). Data like that can still exist. When the
+Checkpoint 4 UI assembles a shift type's current templates into one
+"Shift" and finds they don't actually share one time (and/or one
+effective period), it does **not** guess which row is authoritative — it
+shows a review-required notice ("This shift has different times
+configured on different days...") instead of a schedule, and disables
+the simplified Edit form for it. See
+[`assembleShift`](../src/repositories/assembleShift.ts) and
+[`ShiftSetupPanel`](../src/pages/manager/configuration/ShiftSetupPanel.tsx).
+Resolving such a shift today requires direct database correction
+(deliberately out of scope for the simplified UI); a future checkpoint may
+add an in-UI resolution flow.
+
+**"Last known schedule" for an inactive Shift** (shown on its Inactive
+card, and pre-filled as Reactivate's starting point) is reconstructed from
+whichever `shift_templates` rows share the *latest* `updated_at` for that
+shift type — not the latest `effective_to`. Two distinct retirement events
+(e.g. a weekday dropped by an edit, then the whole Shift deactivated later
+the same day) can coincidentally share an `effective_to` *calendar date*
+while being genuinely different historical batches; `updated_at` (a real
+instant, unique per transaction) is what tells them apart. This exact
+scenario was found by manual testing during Checkpoint 4 and is covered by
+a permanent regression test (see `mock/shiftConfiguration.test.ts` and
+`ShiftSetupPanel.test.tsx`).
+
+**Implemented:** `ShiftRecord`/`assembleShift` (repository layer),
+`ShiftSetupPanel` (Add/Edit/Deactivate/Reactivate, replacing the old Shift
+Types + Recurring Shift Schedule two-layer UI), the atomic
+`create_shift`/`revise_shift`/`deactivate_shift`/`reactivate_shift` RPCs
+(Stage 2D Checkpoint 3).

@@ -64,10 +64,15 @@ export interface ShiftTypeRecord {
 /**
  * requiredDrivers/basePayChf/deliveryRateChf/isPremium are DEPRECATED
  * (Stage 2D Checkpoint 3): staffing now belongs to rota_rules_*, pay to
- * payroll_rules. Nullable here purely because the DB columns are nullable
- * -- the current Shift Setup form (Checkpoint 4 will remove this) still
- * writes real values to them, but materialise_shift_instances no longer
- * reads them off this table at all.
+ * payroll_rules. Nullable here purely because the DB columns are nullable.
+ *
+ * INTERNAL AS OF CHECKPOINT 4: this is the raw per-weekday database row --
+ * `listShiftTemplates` still returns it (used internally to assemble
+ * ShiftRecord, and kept for any future internal/migration tooling), but no
+ * manager-facing UI component should consume it directly any more. The
+ * Shift Setup UI works with `ShiftRecord` instead, which collapses a shift
+ * type's active (or last-known) templates into the single "one Shift, one
+ * time, several weekdays" shape managers actually think in.
  */
 export interface ShiftTemplateRecord {
   id: string;
@@ -84,6 +89,51 @@ export interface ShiftTemplateRecord {
   effectiveFrom: string;
   effectiveTo: string | null;
   isActive: boolean;
+  /**
+   * Used by assembleShift to identify "the batch of rows one atomic RPC
+   * call touched together" for an inactive shift type, when more than one
+   * retirement event happens to share the same effective_to calendar date
+   * (e.g. a weekday removed by revise_shift earlier the same day the shift
+   * is later deactivated) -- effective_to alone can't distinguish those
+   * two events, but they get different updated_at values since each is a
+   * separate transaction. See assembleShift.ts.
+   */
+  updatedAt: string;
+}
+
+/**
+ * The manager-facing "Shift" (Stage 2D Checkpoint 4) -- one stable
+ * shift_type collapsed together with its current (or, once inactive, its
+ * last-known) set of weekday schedule rows into the single shape the
+ * simplified Shift Setup UI renders and edits. Internal concepts (the
+ * stable `key`, per-weekday template rows, the Monday=0..Sunday=6 weekday
+ * integer are still used to build this, but never surfaced beyond it.
+ *
+ * `schedule` is null when the underlying rows are inconsistent (different
+ * start/end times and/or different effective periods across the relevant
+ * weekdays) -- a legacy data state Checkpoint 4's "one shift, one time"
+ * rule doesn't allow going forward, but which the UI must never silently
+ * flatten by guessing a time. See `assembleShifts` in
+ * `repositories/assembleShift.ts` and docs/business-rules.md.
+ */
+export interface ShiftRecord {
+  shiftTypeId: string;
+  resortId: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+  schedule: ShiftScheduleRecord | null;
+  /** Populated only when schedule is null, to drive a useful review-required message. Monday=0..Sunday=6, ascending. */
+  inconsistentWeekdays?: number[];
+}
+
+export interface ShiftScheduleRecord {
+  startTime: string;
+  endTime: string;
+  /** Monday=0..Sunday=6, ascending, deduplicated. */
+  weekdays: number[];
+  effectiveFrom: string;
+  effectiveTo: string | null;
 }
 
 /**

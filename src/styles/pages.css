@@ -756,6 +756,42 @@
   flex-shrink: 0;
 }
 
+/* ---------- Configuration: Shift Setup (Stage 2D Checkpoint 4) ---------- */
+.shift-setup-filter {
+  padding: 0 18px 12px;
+}
+
+.shift-setup-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.shift-setup-card {
+  align-items: flex-start;
+}
+
+.shift-setup-card__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+@media (max-width: 640px) {
+  .shift-setup-card {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .shift-setup-card .config-list-item__main {
+    width: 100%;
+  }
+}
+
 /* ---------- Configuration: schedule-refresh preview groups ---------- */
 .schedule-refresh-group {
   border: 1px solid var(--border-default);

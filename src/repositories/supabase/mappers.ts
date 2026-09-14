@@ -45,6 +45,10 @@ type TemplateRefreshPreviewDbRow = Database['public']['Functions']['preview_temp
 type ApplyTemplateRefreshRow = Database['public']['Functions']['apply_template_refresh']['Returns'][number];
 type TemplateCancellationPreviewDbRow = Database['public']['Functions']['preview_template_cancellation']['Returns'][number];
 type ApplyTemplateCancellationRow = Database['public']['Functions']['apply_template_cancellation']['Returns'][number];
+type CreateShiftRow = Database['public']['Functions']['create_shift']['Returns'][number];
+// revise_shift/deactivate_shift/reactivate_shift all return the same single
+// { shift_type_id } shape -- one shared row type/mapper for all three.
+type ShiftMutationRow = { shift_type_id: string };
 
 export function mapResort(row: ResortRow): ResortRecord {
   return {
@@ -109,7 +113,18 @@ export function mapShiftTemplate(row: ShiftTemplateRow): ShiftTemplateRecord {
     effectiveFrom: row.effective_from,
     effectiveTo: row.effective_to,
     isActive: row.is_active,
+    updatedAt: row.updated_at,
   };
+}
+
+/** create_shift's row also carries the auto-generated internal key -- never surfaced to the manager, kept here only in case a caller ever needs it for logging/debugging. */
+export function mapCreateShiftResult(row: CreateShiftRow): { shiftTypeId: string; key: string } {
+  return { shiftTypeId: row.shift_type_id, key: row.key };
+}
+
+/** Shared by revise_shift/deactivate_shift/reactivate_shift -- all three return just the stable shift_type_id. */
+export function mapShiftMutationResult(row: ShiftMutationRow): { shiftTypeId: string } {
+  return { shiftTypeId: row.shift_type_id };
 }
 
 export function mapShiftInstance(row: ShiftInstanceRow): ShiftInstanceRecord {

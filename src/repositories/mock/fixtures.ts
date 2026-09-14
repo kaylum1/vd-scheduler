@@ -77,6 +77,7 @@ export const mockShiftTemplates: ShiftTemplateRecord[] = [
     effectiveFrom: '2024-01-01',
     effectiveTo: null,
     isActive: true,
+    updatedAt: '2024-01-01T00:00:00.000Z',
   },
   {
     id: 'mock-zermatt-dinner-tpl',
@@ -92,6 +93,7 @@ export const mockShiftTemplates: ShiftTemplateRecord[] = [
     effectiveFrom: '2024-01-01',
     effectiveTo: null,
     isActive: true,
+    updatedAt: '2024-01-01T00:00:00.000Z',
   },
 ];
 

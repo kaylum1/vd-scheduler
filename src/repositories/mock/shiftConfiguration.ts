@@ -1,15 +1,16 @@
-import type { ShiftConfigurationRepository } from '../types';
+import type { ShiftConfigurationRepository, ShiftScheduleInput } from '../types';
 import type {
   ApplyTemplateCancellationResult,
   ApplyTemplateRefreshResult,
   MaterialiseShiftsResult,
   ShiftInstanceRecord,
+  ShiftRecord,
   ShiftTemplateRecord,
-  ShiftTypeRecord,
   TemplateCancellationPreviewRow,
   TemplateRefreshPreviewRow,
 } from '../domain';
 import { RepositoryError } from '../errors';
+import { assembleShifts } from '../assembleShift';
 import { mockShiftTemplates, mockShiftTypes, nextMockShiftTemplateId, nextMockShiftTypeId } from './fixtures';
 import { generateMockShiftInstancesForWeek } from './shiftInstances';
 
@@ -20,8 +21,7 @@ import { generateMockShiftInstancesForWeek } from './shiftInstances';
  * anything against the real database functions — see Stage 2C. Faking a
  * second implementation of that logic here would be exactly the kind of
  * DB-logic duplication the Supabase repository is required to avoid, just
- * moved to the mock side instead of solving the problem. Since nothing
- * consumes these yet (not wired into Configuration UI), a clear "not
+ * moved to the mock side instead of solving the problem. A clear "not
  * supported" error is more honest than a shallow, untested simulation —
  * consistent with how MockAuthService.signIn() throws for operations mock
  * mode has no real equivalent for.
@@ -33,125 +33,219 @@ function notSupportedInMockMode(operation: string): never {
   });
 }
 
-export class MockShiftConfigurationRepository implements ShiftConfigurationRepository {
-  async listShiftTypes(resortId: string): Promise<ShiftTypeRecord[]> {
-    // Shallow copies, not the live fixture objects — rename/reorder/
-    // deactivate mutate mockShiftTypes entries in place, and a consumer
-    // relying on TanStack Query's structural sharing needs genuinely new
-    // objects to detect a change between fetches (see the identical note on
-    // MockDriverRepository.listDrivers).
-    return mockShiftTypes.filter((t) => t.resortId === resortId).map((t) => ({ ...t }));
-  }
+function slugify(name: string): string {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return base || 'shift';
+}
 
-  async listShiftTemplates(shiftTypeId: string): Promise<ShiftTemplateRecord[]> {
-    return mockShiftTemplates.filter((t) => t.shiftTypeId === shiftTypeId).map((t) => ({ ...t }));
+/** Mirrors create_shift's own server-side key generation (auto-suffix on collision) closely enough for mock/demo use — never asks the manager for a key, never rejects a duplicate name. */
+function generateMockShiftKey(resortId: string, name: string): string {
+  const base = slugify(name);
+  const existing = new Set(mockShiftTypes.filter((t) => t.resortId === resortId).map((t) => t.key));
+  if (!existing.has(base)) return base;
+  let suffix = 2;
+  while (existing.has(`${base}_${suffix}`)) suffix += 1;
+  return `${base}_${suffix}`;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * One shared, always-increasing "updatedAt" per repository call -- every
+ * row a single create/revise/deactivate/reactivate call touches (retires
+ * or inserts) gets the SAME value, and each call's value is strictly
+ * greater than every previous call's, mirroring the real RPCs each being
+ * one transaction. This is what lets assembleShift's "last known
+ * schedule" reconstruction for an inactive shift tell apart two different
+ * retirement events even when they share a calendar-date effectiveTo (see
+ * assembleShift.ts's doc comment).
+ *
+ * A monotonic counter rather than `new Date().toISOString()`: two mock
+ * calls made back-to-back in the same synchronous test can land in the
+ * same millisecond, which would silently reintroduce the exact ambiguity
+ * this field exists to resolve. Real Postgres transactions never have
+ * that problem (each is a separate network round trip), so this is a
+ * mock-only concern -- the value's shape (an ISO string) is preserved
+ * purely so ShiftTemplateRecord.updatedAt has one honest type across both
+ * providers; nothing ever parses it as a real instant.
+ */
+let mockUpdatedAtSeq = 0;
+function nowIso(): string {
+  mockUpdatedAtSeq += 1;
+  return new Date(mockUpdatedAtSeq).toISOString();
+}
+
+function validateScheduleInput(input: ShiftScheduleInput, operation: string): void {
+  if (!input.name.trim()) {
+    throw new RepositoryError('A shift needs a name.', { operation, code: '23514' });
+  }
+  if (!input.weekdays || input.weekdays.length === 0) {
+    throw new RepositoryError('Select at least one day of the week.', { operation, code: '23514' });
+  }
+  if (input.endTime <= input.startTime) {
+    throw new RepositoryError('End time must be after start time.', { operation, code: '23514' });
+  }
+}
+
+export class MockShiftConfigurationRepository implements ShiftConfigurationRepository {
+  async listShifts(resortId: string): Promise<ShiftRecord[]> {
+    const shiftTypes = mockShiftTypes.filter((t) => t.resortId === resortId).map((t) => ({ ...t }));
+    const templatesByType = new Map<string, ShiftTemplateRecord[]>(
+      shiftTypes.map((t) => [t.id, mockShiftTemplates.filter((tpl) => tpl.shiftTypeId === t.id).map((tpl) => ({ ...tpl }))])
+    );
+    return assembleShifts(shiftTypes, templatesByType);
   }
 
   async listShiftInstances(params: { resortId: string; weekStart: string }): Promise<ShiftInstanceRecord[]> {
     return generateMockShiftInstancesForWeek(params.resortId, params.weekStart);
   }
 
-  async createShiftType(input: { resortId: string; key: string; name: string; sortOrder: number }): Promise<ShiftTypeRecord> {
-    // Mirrors shift_types_resort_key_unique (migration 05) so mock mode
-    // rejects the same case the real database would, rather than silently
-    // allowing two shift types with the same key at one resort.
-    const duplicate = mockShiftTypes.some((t) => t.resortId === input.resortId && t.key === input.key);
-    if (duplicate) {
-      throw new RepositoryError(`shift type key "${input.key}" already exists at this resort`, {
-        operation: 'shiftConfiguration.createShiftType',
-        code: '23505',
+  async createShift(resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }> {
+    validateScheduleInput(input, 'shiftConfiguration.createShift');
+
+    const key = generateMockShiftKey(resortId, input.name);
+    const nextSortOrder = mockShiftTypes.filter((t) => t.resortId === resortId).reduce((max, t) => Math.max(max, t.sortOrder), 0) + 1;
+    const shiftTypeId = nextMockShiftTypeId();
+    mockShiftTypes.push({ id: shiftTypeId, resortId, key, name: input.name.trim(), sortOrder: nextSortOrder, isActive: true });
+
+    const effectiveFrom = input.effectiveFrom ?? todayIso();
+    const updatedAt = nowIso();
+    for (const weekday of input.weekdays) {
+      mockShiftTemplates.push({
+        id: nextMockShiftTemplateId(),
+        resortId,
+        shiftTypeId,
+        weekday,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        requiredDrivers: null,
+        basePayChf: null,
+        deliveryRateChf: null,
+        isPremium: null,
+        effectiveFrom,
+        effectiveTo: input.effectiveTo ?? null,
+        isActive: true,
+        updatedAt,
       });
     }
-    const record: ShiftTypeRecord = { id: nextMockShiftTypeId(), resortId: input.resortId, key: input.key, name: input.name, sortOrder: input.sortOrder, isActive: true };
-    mockShiftTypes.push(record);
-    return { ...record };
+    return { shiftTypeId };
   }
 
-  async renameShiftType(shiftTypeId: string, name: string): Promise<ShiftTypeRecord> {
+  async reviseShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }> {
     const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId);
-    if (!shiftType) throw new RepositoryError(`shift type ${shiftTypeId} not found`, { operation: 'shiftConfiguration.renameShiftType' });
-    shiftType.name = name;
-    return { ...shiftType };
+    if (!shiftType) throw new RepositoryError('Shift not found.', { operation: 'shiftConfiguration.reviseShift', code: 'P0002' });
+    if (!shiftType.isActive) {
+      throw new RepositoryError('An inactive shift must be reactivated before it can be revised.', {
+        operation: 'shiftConfiguration.reviseShift',
+        code: '55006',
+      });
+    }
+    validateScheduleInput(input, 'shiftConfiguration.reviseShift');
+
+    shiftType.name = input.name.trim();
+    const effectiveFrom = input.effectiveFrom ?? todayIso();
+    const updatedAt = nowIso();
+
+    // Simplified relative to the real revise_shift RPC: every weekday's
+    // currently-active row (if any) is retired and replaced, rather than
+    // updated in place when it hadn't started yet. That historical nuance
+    // only matters for real production data integrity, not for exercising
+    // the UI against mock data.
+    for (const template of mockShiftTemplates) {
+      if (template.shiftTypeId === shiftTypeId && template.isActive && !input.weekdays.includes(template.weekday)) {
+        template.isActive = false;
+        template.effectiveTo = effectiveFrom;
+        template.updatedAt = updatedAt;
+      }
+    }
+    for (const weekday of input.weekdays) {
+      const current = mockShiftTemplates.find((t) => t.shiftTypeId === shiftTypeId && t.weekday === weekday && t.isActive);
+      if (current) {
+        current.isActive = false;
+        current.effectiveTo = effectiveFrom;
+        current.updatedAt = updatedAt;
+      }
+      mockShiftTemplates.push({
+        id: nextMockShiftTemplateId(),
+        resortId,
+        shiftTypeId,
+        weekday,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        requiredDrivers: null,
+        basePayChf: null,
+        deliveryRateChf: null,
+        isPremium: null,
+        effectiveFrom,
+        effectiveTo: input.effectiveTo ?? null,
+        isActive: true,
+        updatedAt,
+      });
+    }
+    return { shiftTypeId };
   }
 
-  async reorderShiftType(shiftTypeId: string, sortOrder: number): Promise<ShiftTypeRecord> {
-    const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId);
-    if (!shiftType) throw new RepositoryError(`shift type ${shiftTypeId} not found`, { operation: 'shiftConfiguration.reorderShiftType' });
-    shiftType.sortOrder = sortOrder;
-    return { ...shiftType };
-  }
-
-  async deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord> {
-    const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId);
-    if (!shiftType) throw new RepositoryError(`shift type ${shiftTypeId} not found`, { operation: 'shiftConfiguration.deactivateShiftType' });
-    // Mirrors shift_types_prevent_unsafe_deactivation_trg (Stage 2D
-    // Checkpoint 1 guard): never orphan an active recurring template.
-    const activeTemplateCount = mockShiftTemplates.filter((t) => t.shiftTypeId === shiftTypeId && t.isActive).length;
-    if (activeTemplateCount > 0) {
-      throw new RepositoryError(
-        `shift type ${shiftTypeId} has ${activeTemplateCount} active recurring template(s); deactivate those first`,
-        { operation: 'shiftConfiguration.deactivateShiftType', code: '55006' }
-      );
+  async deactivateShift(shiftTypeId: string, _resortId: string, effectiveTo?: string): Promise<{ shiftTypeId: string }> {
+    const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId && t.isActive);
+    if (!shiftType) {
+      throw new RepositoryError('Shift not found or already inactive.', { operation: 'shiftConfiguration.deactivateShift', code: 'P0002' });
+    }
+    const resolvedEffectiveTo = effectiveTo ?? todayIso();
+    const updatedAt = nowIso();
+    for (const template of mockShiftTemplates) {
+      if (template.shiftTypeId === shiftTypeId && template.isActive) {
+        template.isActive = false;
+        template.effectiveTo = template.effectiveFrom > resolvedEffectiveTo ? template.effectiveFrom : resolvedEffectiveTo;
+        template.updatedAt = updatedAt;
+      }
     }
     shiftType.isActive = false;
-    return { ...shiftType };
+    return { shiftTypeId };
   }
 
-  async createShiftTemplateVersion(input: {
-    shiftTypeId: string;
-    resortId: string;
-    weekday: number;
-    startTime: string;
-    endTime: string;
-    requiredDrivers: number;
-    basePayChf: number;
-    deliveryRateChf: number;
-    isPremium: boolean;
-    effectiveFrom: string;
-    effectiveTo?: string;
-  }): Promise<ShiftTemplateRecord> {
-    // Mirrors shift_templates_no_overlap (migration 05, a GIST exclusion
-    // constraint): no two *active* versions of the same shift type + weekday
-    // may have overlapping effective-date ranges.
-    const newFrom = input.effectiveFrom;
-    const newTo = input.effectiveTo ?? '9999-12-31';
-    const overlap = mockShiftTemplates.some((t) => {
-      if (t.shiftTypeId !== input.shiftTypeId || t.weekday !== input.weekday || !t.isActive) return false;
-      const existingTo = t.effectiveTo ?? '9999-12-31';
-      return t.effectiveFrom <= newTo && existingTo >= newFrom;
-    });
-    if (overlap) {
-      throw new RepositoryError('a schedule already covers this weekday for these dates', {
-        operation: 'shiftConfiguration.createShiftTemplateVersion',
-        code: '23P01',
-      });
+  async reactivateShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }> {
+    const shiftType = mockShiftTypes.find((t) => t.id === shiftTypeId);
+    if (!shiftType) throw new RepositoryError('Shift not found.', { operation: 'shiftConfiguration.reactivateShift', code: 'P0002' });
+    if (shiftType.isActive) {
+      throw new RepositoryError('This shift is already active.', { operation: 'shiftConfiguration.reactivateShift', code: '23514' });
+    }
+    if (input.endTime <= input.startTime) {
+      throw new RepositoryError('End time must be after start time.', { operation: 'shiftConfiguration.reactivateShift', code: '23514' });
+    }
+    if (!input.weekdays || input.weekdays.length === 0) {
+      throw new RepositoryError('Select at least one day of the week.', { operation: 'shiftConfiguration.reactivateShift', code: '23514' });
     }
 
-    const record: ShiftTemplateRecord = {
-      id: nextMockShiftTemplateId(),
-      resortId: input.resortId,
-      shiftTypeId: input.shiftTypeId,
-      weekday: input.weekday,
-      startTime: input.startTime,
-      endTime: input.endTime,
-      requiredDrivers: input.requiredDrivers,
-      basePayChf: input.basePayChf,
-      deliveryRateChf: input.deliveryRateChf,
-      isPremium: input.isPremium,
-      effectiveFrom: input.effectiveFrom,
-      effectiveTo: input.effectiveTo ?? null,
-      isActive: true,
-    };
-    mockShiftTemplates.push(record);
-    return { ...record };
-  }
-
-  async deactivateShiftTemplate(templateId: string, effectiveTo: string): Promise<ShiftTemplateRecord> {
-    const template = mockShiftTemplates.find((t) => t.id === templateId);
-    if (!template) throw new RepositoryError(`shift template ${templateId} not found`, { operation: 'shiftConfiguration.deactivateShiftTemplate' });
-    template.effectiveTo = effectiveTo;
-    template.isActive = false;
-    return { ...template };
+    shiftType.isActive = true;
+    const effectiveFrom = input.effectiveFrom ?? todayIso();
+    const updatedAt = nowIso();
+    // Every prior row is already inactive at this point -- always fresh
+    // inserts, never flipping an old historical row back to active.
+    for (const weekday of input.weekdays) {
+      mockShiftTemplates.push({
+        id: nextMockShiftTemplateId(),
+        resortId,
+        shiftTypeId,
+        weekday,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        requiredDrivers: null,
+        basePayChf: null,
+        deliveryRateChf: null,
+        isPremium: null,
+        effectiveFrom,
+        effectiveTo: input.effectiveTo ?? null,
+        isActive: true,
+        updatedAt,
+      });
+    }
+    return { shiftTypeId };
   }
 
   async materialiseShifts(_resortId: string, _fromDate?: string, _toDate?: string): Promise<MaterialiseShiftsResult> {

@@ -434,6 +434,11 @@
   color: var(--green-600);
 }
 
+.inline-notice--warning {
+  background: var(--amber-50);
+  color: var(--amber-600);
+}
+
 .inline-notice--error {
   background: var(--red-50);
   color: var(--red-600);
@@ -528,6 +533,41 @@
   flex-shrink: 0;
 }
 
+/* ---------- Form field: radio group (e.g. Shift Setup's "Ends" choice) ---------- */
+.form-field--radio-group .radio-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+  margin-top: 6px;
+}
+
+.form-field--radio-group .radio-option input[type='radio'] {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.form-field--radio-group .radio-option input[type='date'] {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.form-field--radio-group .radio-option input[type='date']:disabled {
+  background: var(--bg-panel-muted);
+  color: var(--text-tertiary);
+}
+
 /* ---------- Form row: two fields side by side, stacking on mobile ---------- */
 .form-row {
   display: flex;
@@ -580,4 +620,50 @@
 .segmented__item:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ---------- Shift Setup: weekday multi-select toggle (Add/Edit/Reactivate) ---------- */
+.weekday-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weekday-toggle-group__day {
+  border: 1px solid var(--border-default);
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  min-width: 42px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.weekday-toggle-group__day:hover {
+  background: var(--bg-panel-muted);
+}
+
+.weekday-toggle-group__day.is-active {
+  background: var(--blue-50);
+  border-color: var(--blue-600);
+  color: var(--blue-700);
+}
+
+/* ---------- Shift Setup: Time field (start -> end on one row) ---------- */
+.shift-form-time-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shift-form-time-row input[type='time'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.shift-form-time-row span {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
 }

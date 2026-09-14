@@ -48,7 +48,7 @@ export function ConfigurationPage() {
           <EmptyState
             icon={<IconPayroll />}
             title="Coming in a later stage"
-            hint="Base pay, delivery rates and payroll adjustment rules will be configurable here in a future checkpoint."
+            hint="Configure base and per-delivery pay for each shift. Not available yet — until then, generated shifts show a Needs Attention notice for any missing pay."
           />
         </Card>
       )}
@@ -59,7 +59,7 @@ export function ConfigurationPage() {
           <EmptyState
             icon={<IconCalendar />}
             title="Coming in a later stage"
-            hint="Publication deadlines, availability windows and rota-generation rules will be configurable here in a future checkpoint."
+            hint="Configure normal staffing requirements and high-value shifts. Not available yet — until then, generated shifts show a Needs Attention notice for any missing staffing."
           />
         </Card>
       )}

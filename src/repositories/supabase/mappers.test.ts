@@ -4,6 +4,7 @@ import {
   mapApplyTemplateRefreshResult,
   mapAvailability,
   mapConfirmWeekOutcome,
+  mapCreateShiftResult,
   mapDriver,
   mapDriverOnfleetMapping,
   mapDriverVisibleAssignment,
@@ -12,6 +13,7 @@ import {
   mapReopenWeekOutcome,
   mapResort,
   mapShiftInstance,
+  mapShiftMutationResult,
   mapSupportedLanguage,
   mapTemplateCancellationPreviewRow,
   mapTemplateRefreshPreviewRow,
@@ -256,6 +258,17 @@ describe('RPC response mapping', () => {
     });
     expect(mapped.result).toBe('reopened');
     expect(mapped.reopenedReason).toBe('driver_reopened');
+  });
+});
+
+describe('Stage 2D Checkpoint 4: atomic shift RPC response mapping', () => {
+  it('maps create_shift(), including the internal key (never surfaced to the manager, kept only for logging)', () => {
+    const mapped = mapCreateShiftResult({ shift_type_id: 'st1', key: 'dinner_2' });
+    expect(mapped).toEqual({ shiftTypeId: 'st1', key: 'dinner_2' });
+  });
+
+  it('maps revise_shift()/deactivate_shift()/reactivate_shift() -- all three share the same { shift_type_id } row shape', () => {
+    expect(mapShiftMutationResult({ shift_type_id: 'st1' })).toEqual({ shiftTypeId: 'st1' });
   });
 });
 

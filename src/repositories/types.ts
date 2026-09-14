@@ -34,8 +34,7 @@ import type {
   ReopenWeekOutcome,
   ResortRecord,
   ShiftInstanceRecord,
-  ShiftTemplateRecord,
-  ShiftTypeRecord,
+  ShiftRecord,
   SupportedLanguageRecord,
   TemplateCancellationPreviewRow,
   TemplateRefreshPreviewRow,
@@ -91,61 +90,77 @@ export interface DriverRepository {
   setOnfleetMapping(driverId: string, onfleetWorkerId: string): Promise<DriverOnfleetMappingRecord>;
 }
 
+/**
+ * Fields for create_shift/revise_shift/reactivate_shift's manager-facing
+ * schedule input -- deliberately excludes pay/required drivers/high-value/
+ * key/timezone (Stage 2D Checkpoint 4: those belong elsewhere or stay
+ * internal, never asked of the manager in Shift Setup).
+ */
+export interface ShiftScheduleInput {
+  name: string;
+  startTime: string;
+  endTime: string;
+  /** Monday=0..Sunday=6. At least one required -- enforced by the RPC itself, not just client-side validation. */
+  weekdays: number[];
+  /** Defaults to "today" in the resort's own timezone (resolved server-side) when omitted. */
+  effectiveFrom?: string;
+  /** Open-ended ("continues until changed") when omitted. */
+  effectiveTo?: string;
+}
+
 export interface ShiftConfigurationRepository {
-  listShiftTypes(resortId: string): Promise<ShiftTypeRecord[]>;
-  listShiftTemplates(shiftTypeId: string): Promise<ShiftTemplateRecord[]>;
+  /**
+   * The manager-facing "Shift" list (Stage 2D Checkpoint 4) -- one entry
+   * per shift type, its current (or last-known) schedule assembled via
+   * `assembleShifts`. This is what Shift Setup renders; components should
+   * never need `listShiftTypes`/`listShiftTemplates` directly any more.
+   */
+  listShifts(resortId: string): Promise<ShiftRecord[]>;
   /** Manager-side, full-fidelity read (pay/premium/headcount included). */
   listShiftInstances(params: { resortId: string; weekStart: string }): Promise<ShiftInstanceRecord[]>;
 
-  createShiftType(input: { resortId: string; key: string; name: string; sortOrder: number }): Promise<ShiftTypeRecord>;
-  renameShiftType(shiftTypeId: string, name: string): Promise<ShiftTypeRecord>;
-  /** Display ordering only — never touches `key` or `resort_id`, both immutable after creation (Stage 2D Checkpoint 1 guard). */
-  reorderShiftType(shiftTypeId: string, sortOrder: number): Promise<ShiftTypeRecord>;
-  /** Rejected by the database if any of the shift type's recurring templates are still active — surface that as a manager-facing error, not a workaround. */
-  deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord>;
-
   /**
-   * Overlap (same resort/shift type/weekday, active, overlapping effective
-   * range) is rejected by the database's exclusion constraint — surface
-   * that as a manager-facing "already a schedule covering that day" error,
-   * never a raw constraint message.
+   * Atomic (create_shift): one new stable shift + its whole weekday
+   * schedule in a single transaction. No pay/required-drivers/high-value
+   * inputs -- those belong to Payroll/Rota Rules, configured separately.
+   * The internal `key` is generated server-side; the manager never sees or
+   * supplies it, and a name that collides with an existing key is silently
+   * disambiguated, never rejected.
    */
-  createShiftTemplateVersion(input: {
-    shiftTypeId: string;
-    resortId: string;
-    weekday: number;
-    startTime: string;
-    endTime: string;
-    requiredDrivers: number;
-    basePayChf: number;
-    deliveryRateChf: number;
-    isPremium: boolean;
-    effectiveFrom: string;
-    /** Open-ended (current/ongoing) when omitted. */
-    effectiveTo?: string;
-  }): Promise<ShiftTemplateRecord>;
+  createShift(resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }>;
   /**
-   * Closes a template version through the effective-dated model (sets
-   * effective_to + is_active=false) — never a raw field update. To "revise"
-   * an active template (change its time/pay/headcount going forward),
-   * deactivate it with effectiveTo = the day before the new version's
-   * effectiveFrom, then call createShiftTemplateVersion for the new one —
-   * there is no combined "update in place" operation, matching the
-   * approved effective-dated model (past configuration is never rewritten).
+   * Atomic (revise_shift): renames/retimes/reschedules an ACTIVE shift in
+   * one transaction, diffing the current weekday set against the new one
+   * server-side. Never rewrites history -- a weekday version that already
+   * governs real dates is retired, not overwritten in place.
    */
-  deactivateShiftTemplate(templateId: string, effectiveTo: string): Promise<ShiftTemplateRecord>;
+  reviseShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }>;
+  /**
+   * Atomic (deactivate_shift): ends every active weekday and marks the
+   * shift inactive, in one transaction. Never deletes the underlying
+   * shift_type, and never touches already-materialised future
+   * shift_instances -- use preview/applyTemplateCancellation separately
+   * for those.
+   */
+  deactivateShift(shiftTypeId: string, resortId: string, effectiveTo?: string): Promise<{ shiftTypeId: string }>;
+  /**
+   * Atomic (reactivate_shift): brings an inactive shift back under the
+   * SAME stable shift_type_id, with brand-new schedule rows from
+   * `input.effectiveFrom` -- never resurrects/reopens old historical rows.
+   */
+  reactivateShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }>;
 
   // Deliberately no "moveShiftInstanceDate"-style method: shift_instances.date
-  // is immutable (Checkpoint 4). Moving a shift is cancel + create new,
-  // which belongs to a future rota-management checkpoint, not here.
+  // is immutable. Moving a shift is cancel + create new, which belongs to a
+  // future rota-management checkpoint, not here.
 
   // Stage 2C: materialisation + template refresh/cancellation. Thin RPC
   // wrappers only — the database functions remain authoritative; nothing
-  // here reimplements their logic. Not yet wired into any UI.
+  // here reimplements their logic.
 
-  /** Insert-only: creates missing shift_instances from active templates. Default horizon: today through end of next month. */
+  /** Insert-only: creates missing shift_instances from active templates. Default horizon: today through end of next month. Result includes missing-payroll/rota-rule counts (Stage 2D Checkpoint 3) -- informational, never a failure. */
   materialiseShifts(resortId: string, fromDate?: string, toDate?: string): Promise<MaterialiseShiftsResult>;
-  /** Read-only: what apply_template_refresh would change for the currently-safe (v_refreshable_instances) set. */
+  /** Read-only: what apply_template_refresh would change for the currently-safe (v_refreshable_instances) set. Schedule fields only (name/sort_order/start_time/end_time) since Stage 2D Checkpoint 3 -- pay/staffing/high-value are no longer schedule-refresh concerns. */
   previewTemplateRefresh(resortId: string, fromDate?: string): Promise<TemplateRefreshPreviewRow[]>;
   /** Updates exactly the previewed safe set from their current governing template. Never removes assignments. */
   applyTemplateRefresh(resortId: string, fromDate?: string): Promise<ApplyTemplateRefreshResult>;
