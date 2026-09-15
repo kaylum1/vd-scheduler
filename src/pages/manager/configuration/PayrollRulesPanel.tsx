@@ -8,7 +8,7 @@ import { InlineNotice } from '../../../components/ui/InlineNotice';
 import { Modal } from '../../../components/ui/Modal';
 import { IconPayroll, IconTruck } from '../../../components/ui/icons';
 import { getRepositories } from '../../../repositories';
-import type { DriverRecord, ShiftRecord } from '../../../repositories/domain';
+import type { DriverDeliveryRateRecord, DriverRecord, ShiftBasePayRuleRecord, ShiftRecord } from '../../../repositories/domain';
 import { getOperationalToday } from '../../../lib/operationalTime';
 import { describeConfigurationError } from './errorMessages';
 import { formatIsoDateLong, toIsoDateString } from './isoDate';
@@ -117,6 +117,11 @@ function PayrollRulesForResort({ resortId, resortName }: { resortId: string; res
   const [historyShift, setHistoryShift] = useState<ShiftRecord | null>(null);
   const [ratingDriver, setRatingDriver] = useState<DriverRecord | null>(null);
   const [historyDriver, setHistoryDriver] = useState<DriverRecord | null>(null);
+  // Stage 2D Payroll Checkpoint B.1: correction is a deliberate, separate
+  // action from scheduling a future change -- its own modal, targeting one
+  // specific existing (still-open) rule row by id.
+  const [correctingShiftRule, setCorrectingShiftRule] = useState<{ shift: ShiftRecord; rule: ShiftBasePayRuleRecord } | null>(null);
+  const [correctingDriverRule, setCorrectingDriverRule] = useState<{ driver: DriverRecord; rule: DriverDeliveryRateRecord } | null>(null);
   const [driverFilter, setDriverFilter] = useState<DriverFilter>('active');
 
   const shiftsQuery = useQuery({
@@ -258,17 +263,27 @@ function PayrollRulesForResort({ resortId, resortName }: { resortId: string; res
       {ratingShift &&
         (() => {
           const periods = (baseRulesQuery.data ?? []).filter((r) => r.shiftTypeId === ratingShift.shiftTypeId);
-          const { current } = categorizeRatePeriods(periods, today);
+          const { current, scheduled } = categorizeRatePeriods(periods, today);
+          const nextScheduled = scheduled[0] ?? null;
           return (
             <RateAmountModal
-              title={current ? `Edit base pay — ${ratingShift.name}` : `Set base pay — ${ratingShift.name}`}
+              title={current || nextScheduled ? `Edit base pay — ${ratingShift.name}` : `Set base pay — ${ratingShift.name}`}
               amountLabel="Base pay"
+              unitSuffix="/ attended shift"
               helperText="This is the minimum pay guaranteed to each driver who attends this Shift."
-              currentSummary={current ? `${chf(current.basePayChf)} / attended shift` : undefined}
-              initialAmount={current?.basePayChf ?? 0}
-              onSubmit={(amount, effectiveFrom) =>
+              current={current ? { amount: current.basePayChf, effectiveFrom: current.effectiveFrom } : null}
+              scheduled={nextScheduled ? { amount: nextScheduled.basePayChf, effectiveFrom: nextScheduled.effectiveFrom } : null}
+              onSubmitFutureChange={(amount, effectiveFrom) =>
                 getRepositories().payrollRules.setShiftBasePayRate(ratingShift.shiftTypeId, resortId, amount, effectiveFrom)
               }
+              onCorrectCurrent={current ? () => {
+                setRatingShift(null);
+                setCorrectingShiftRule({ shift: ratingShift, rule: current });
+              } : undefined}
+              onCorrectScheduled={nextScheduled ? () => {
+                setRatingShift(null);
+                setCorrectingShiftRule({ shift: ratingShift, rule: nextScheduled });
+              } : undefined}
               onClose={() => setRatingShift(null)}
               onSaved={() => {
                 setRatingShift(null);
@@ -277,6 +292,28 @@ function PayrollRulesForResort({ resortId, resortName }: { resortId: string; res
             />
           );
         })()}
+
+      {correctingShiftRule && (
+        <CorrectRateModal
+          title={`Correct base pay — ${correctingShiftRule.shift.name}`}
+          amountLabel="Correct rate"
+          unitSuffix="/ attended shift"
+          currentAmount={correctingShiftRule.rule.basePayChf}
+          onSubmit={(newAmount) =>
+            getRepositories().payrollRules.correctShiftBasePayRate(
+              correctingShiftRule.shift.shiftTypeId,
+              resortId,
+              correctingShiftRule.rule.id,
+              newAmount
+            )
+          }
+          onClose={() => setCorrectingShiftRule(null)}
+          onSaved={() => {
+            setCorrectingShiftRule(null);
+            invalidateBaseRules();
+          }}
+        />
+      )}
 
       {historyShift &&
         (() => {
@@ -294,15 +331,25 @@ function PayrollRulesForResort({ resortId, resortName }: { resortId: string; res
       {ratingDriver &&
         (() => {
           const periods = (rateRulesQuery.data ?? []).filter((r) => r.driverId === ratingDriver.id);
-          const { current } = categorizeRatePeriods(periods, today);
+          const { current, scheduled } = categorizeRatePeriods(periods, today);
+          const nextScheduled = scheduled[0] ?? null;
           return (
             <RateAmountModal
-              title={current ? `Edit delivery rate — ${ratingDriver.fullName}` : `Set delivery rate — ${ratingDriver.fullName}`}
+              title={current || nextScheduled ? `Edit delivery rate — ${ratingDriver.fullName}` : `Set delivery rate — ${ratingDriver.fullName}`}
               amountLabel="Rate per completed delivery"
+              unitSuffix="/ completed delivery"
               helperText="Paid for each completed delivery this driver makes during a worked Shift."
-              currentSummary={current ? `${chf(current.rateChf)} / completed delivery` : undefined}
-              initialAmount={current?.rateChf ?? 0}
-              onSubmit={(amount, effectiveFrom) => getRepositories().payrollRules.setDriverDeliveryRate(ratingDriver.id, amount, effectiveFrom)}
+              current={current ? { amount: current.rateChf, effectiveFrom: current.effectiveFrom } : null}
+              scheduled={nextScheduled ? { amount: nextScheduled.rateChf, effectiveFrom: nextScheduled.effectiveFrom } : null}
+              onSubmitFutureChange={(amount, effectiveFrom) => getRepositories().payrollRules.setDriverDeliveryRate(ratingDriver.id, amount, effectiveFrom)}
+              onCorrectCurrent={current ? () => {
+                setRatingDriver(null);
+                setCorrectingDriverRule({ driver: ratingDriver, rule: current });
+              } : undefined}
+              onCorrectScheduled={nextScheduled ? () => {
+                setRatingDriver(null);
+                setCorrectingDriverRule({ driver: ratingDriver, rule: nextScheduled });
+              } : undefined}
               onClose={() => setRatingDriver(null)}
               onSaved={() => {
                 setRatingDriver(null);
@@ -311,6 +358,23 @@ function PayrollRulesForResort({ resortId, resortName }: { resortId: string; res
             />
           );
         })()}
+
+      {correctingDriverRule && (
+        <CorrectRateModal
+          title={`Correct delivery rate — ${correctingDriverRule.driver.fullName}`}
+          amountLabel="Correct rate"
+          unitSuffix="/ completed delivery"
+          currentAmount={correctingDriverRule.rule.rateChf}
+          onSubmit={(newAmount) =>
+            getRepositories().payrollRules.correctDriverDeliveryRate(correctingDriverRule.driver.id, correctingDriverRule.rule.id, newAmount)
+          }
+          onClose={() => setCorrectingDriverRule(null)}
+          onSaved={() => {
+            setCorrectingDriverRule(null);
+            invalidateRates();
+          }}
+        />
+      )}
 
       {historyDriver &&
         (() => {
@@ -418,37 +482,50 @@ function DriverRateRow({
 }
 
 /**
- * Shared Set/Edit form for both rate types -- amount + effective date only.
- * A manager never sees "effective dating"/table/ID terminology: just
- * "Applies from" (first-time) / "Changes from" (editing an existing rate).
+ * Shared Set/Schedule-change form for both rate types -- amount + effective
+ * date only. A manager never sees "effective dating"/table/ID terminology:
+ * just "Applies from" (first-time) / "Changes from" (scheduling a change).
+ *
+ * Stage 2D Payroll Checkpoint B.1: when a current and/or scheduled period
+ * already exists, this modal ALSO surfaces a "Correct current/scheduled
+ * rate" action for each -- a deliberate, separate operation from the
+ * future-change form below it (see CorrectRateModal). Scheduling a future
+ * change here NEVER mutates an existing row's own value in place; only the
+ * explicit correction action does that.
  */
 function RateAmountModal({
   title,
   amountLabel,
+  unitSuffix,
   helperText,
-  currentSummary,
-  initialAmount,
-  onSubmit,
+  current,
+  scheduled,
+  onSubmitFutureChange,
+  onCorrectCurrent,
+  onCorrectScheduled,
   onClose,
   onSaved,
 }: {
   title: string;
   amountLabel: string;
+  unitSuffix: string;
   helperText: string;
-  currentSummary?: string;
-  initialAmount: number;
-  onSubmit: (amountChf: number, effectiveFrom: string) => Promise<unknown>;
+  current: { amount: number; effectiveFrom: string } | null;
+  scheduled: { amount: number; effectiveFrom: string } | null;
+  onSubmitFutureChange: (amountChf: number, effectiveFrom: string) => Promise<unknown>;
+  onCorrectCurrent?: () => void;
+  onCorrectScheduled?: () => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const today = toIsoDateString(getOperationalToday());
-  const [amount, setAmount] = useState(initialAmount > 0 ? String(initialAmount) : '');
+  const [amount, setAmount] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(today);
   const [touched, setTouched] = useState(false);
-  const isEdit = !!currentSummary;
+  const isEdit = current !== null || scheduled !== null;
 
   const mutation = useMutation({
-    mutationFn: () => onSubmit(Number(amount), effectiveFrom),
+    mutationFn: () => onSubmitFutureChange(Number(amount), effectiveFrom),
     onSuccess: onSaved,
   });
 
@@ -475,23 +552,149 @@ function RateAmountModal({
               if (canSubmit) mutation.mutate();
             }}
           >
-            {mutation.isPending ? 'Saving…' : isEdit ? 'Save Change' : 'Set Rate'}
+            {mutation.isPending ? 'Saving…' : isEdit ? 'Schedule Change' : 'Set Rate'}
           </Button>
         </>
       }
     >
       {mutation.isError && <InlineNotice tone="error">{describeConfigurationError(mutation.error, 'payrollRule')}</InlineNotice>}
-      {currentSummary && (
-        <p className="form-field__hint" style={{ marginTop: 0, marginBottom: 12 }}>
-          Current: {currentSummary}
-        </p>
+
+      {current && (
+        <div className="config-form-section">
+          <div className="config-form-section__title">Current</div>
+          <p style={{ margin: '0 0 2px', fontWeight: 600 }}>
+            {chf(current.amount)} {unitSuffix}
+          </p>
+          <p className="form-field__hint" style={{ marginTop: 0 }}>
+            Since {formatIsoDateLong(current.effectiveFrom)}
+          </p>
+          {onCorrectCurrent && (
+            <Button variant="ghost" size="sm" onClick={onCorrectCurrent}>
+              Correct current rate
+            </Button>
+          )}
+        </div>
       )}
+
+      {scheduled && (
+        <div className="config-form-section">
+          <div className="config-form-section__title">Scheduled</div>
+          <p style={{ margin: '0 0 2px', fontWeight: 600 }}>
+            {chf(scheduled.amount)} {unitSuffix}
+          </p>
+          <p className="form-field__hint" style={{ marginTop: 0 }}>
+            From {formatIsoDateLong(scheduled.effectiveFrom)}
+          </p>
+          {onCorrectScheduled && (
+            <Button variant="ghost" size="sm" onClick={onCorrectScheduled}>
+              Correct scheduled rate
+            </Button>
+          )}
+        </div>
+      )}
+
+      <div className="config-form-section">
+        {isEdit && <div className="config-form-section__title">New future rate</div>}
+        <div className="form-field">
+          <label htmlFor="rate-amount-input">{amountLabel}</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span aria-hidden="true">CHF</span>
+            <input
+              id="rate-amount-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              autoFocus
+            />
+          </div>
+          {amountError && <span className="form-field__error">{amountError}</span>}
+        </div>
+        <div className="form-field">
+          <label htmlFor="rate-effective-from-input">{isEdit ? 'Changes from' : 'Applies from'}</label>
+          <input
+            id="rate-effective-from-input"
+            type="date"
+            value={effectiveFrom}
+            onChange={(e) => setEffectiveFrom(e.target.value)}
+          />
+          {dateError && <span className="form-field__error">{dateError}</span>}
+        </div>
+        <p className="form-field__hint">{helperText}</p>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Stage 2D Payroll Checkpoint B.1: the explicit, separate correction
+ * action. Fixes a data-entry mistake on the CURRENTLY-TARGETED existing
+ * rule (current or scheduled) -- never schedules a new period, never
+ * touches effective dates, so Rate History never gains a fake period from
+ * a typo fix (see docs/business-rules.md section G).
+ */
+function CorrectRateModal({
+  title,
+  amountLabel,
+  unitSuffix,
+  currentAmount,
+  onSubmit,
+  onClose,
+  onSaved,
+}: {
+  title: string;
+  amountLabel: string;
+  unitSuffix: string;
+  currentAmount: number;
+  onSubmit: (newAmountChf: number) => Promise<unknown>;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [amount, setAmount] = useState(String(currentAmount));
+  const [touched, setTouched] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: () => onSubmit(Number(amount)),
+    onSuccess: onSaved,
+  });
+
+  const parsedAmount = Number(amount);
+  const amountInvalid = amount.trim() === '' || Number.isNaN(parsedAmount) || parsedAmount < 0;
+  const amountError = touched && amountInvalid ? 'Enter an amount of CHF 0 or more.' : null;
+
+  return (
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger-outline"
+            disabled={mutation.isPending}
+            onClick={() => {
+              setTouched(true);
+              if (!amountInvalid) mutation.mutate();
+            }}
+          >
+            {mutation.isPending ? 'Confirming…' : 'Confirm Correction'}
+          </Button>
+        </>
+      }
+    >
+      {mutation.isError && <InlineNotice tone="error">{describeConfigurationError(mutation.error, 'payrollRule')}</InlineNotice>}
+      <p className="form-field__hint" style={{ marginTop: 0 }}>
+        Current recorded rate: {chf(currentAmount)} {unitSuffix}
+      </p>
       <div className="form-field">
-        <label htmlFor="rate-amount-input">{amountLabel}</label>
+        <label htmlFor="correct-rate-amount-input">{amountLabel}</label>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span aria-hidden="true">CHF</span>
           <input
-            id="rate-amount-input"
+            id="correct-rate-amount-input"
             type="number"
             min="0"
             step="0.01"
@@ -502,17 +705,9 @@ function RateAmountModal({
         </div>
         {amountError && <span className="form-field__error">{amountError}</span>}
       </div>
-      <div className="form-field">
-        <label htmlFor="rate-effective-from-input">{isEdit ? 'Changes from' : 'Applies from'}</label>
-        <input
-          id="rate-effective-from-input"
-          type="date"
-          value={effectiveFrom}
-          onChange={(e) => setEffectiveFrom(e.target.value)}
-        />
-        {dateError && <span className="form-field__error">{dateError}</span>}
-      </div>
-      <p className="form-field__hint">{helperText}</p>
+      <p className="form-field__hint">
+        Use this only to correct a rate that was entered incorrectly. The correction will be recorded in the audit log.
+      </p>
     </Modal>
   );
 }

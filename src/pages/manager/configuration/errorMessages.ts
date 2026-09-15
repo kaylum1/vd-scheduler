@@ -149,8 +149,13 @@ function describePayrollRuleError(error: RepositoryError): string {
       return 'That date overlaps a rate that already applies for this period. Choose a different date.';
     case '23503': // foreign_key_violation — set_shift_base_pay_rate: shift/resort mismatch
       return 'That Shift is no longer valid for this resort. Refresh and try again.';
-    case 'P0002': // no_data_found — set_driver_delivery_rate: driver not found
+    case 'P0002': // no_data_found — either "driver not found" (set_driver_delivery_rate) or "rate not found" (correct_*); disambiguate on text.
+      if (/rate could not be found/i.test(raw)) {
+        return 'This rate could not be found. It may have changed elsewhere — refresh and try again.';
+      }
       return 'This driver could not be found. It may have changed elsewhere — refresh and try again.';
+    case '55006': // object_in_use — correct_*: target period has already closed (Stage 2D Payroll Checkpoint B.1)
+      return 'This rate has already changed since you opened this form — refresh and try again.';
     case '42501':
       return error.userMessage;
     case 'mock_unsupported':

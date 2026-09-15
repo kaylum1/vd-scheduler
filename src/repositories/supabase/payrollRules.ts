@@ -3,7 +3,14 @@ import type { Database } from '../../types/database.generated';
 import type { PayrollRulesRepository } from '../types';
 import type { DriverDeliveryRateRecord, ShiftBasePayRuleRecord } from '../domain';
 import { unwrap } from '../errors';
-import { mapDriverDeliveryRate, mapSetDriverDeliveryRateResult, mapSetShiftBasePayRateResult, mapShiftBasePayRule } from './mappers';
+import {
+  mapCorrectDriverDeliveryRateResult,
+  mapCorrectShiftBasePayRateResult,
+  mapDriverDeliveryRate,
+  mapSetDriverDeliveryRateResult,
+  mapSetShiftBasePayRateResult,
+  mapShiftBasePayRule,
+} from './mappers';
 
 export class SupabasePayrollRulesRepository implements PayrollRulesRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
@@ -52,5 +59,35 @@ export class SupabasePayrollRulesRepository implements PayrollRulesRepository {
       })
     );
     return mapSetDriverDeliveryRateResult(rows[0]);
+  }
+
+  async correctShiftBasePayRate(
+    shiftTypeId: string,
+    resortId: string,
+    ruleId: string,
+    newBasePayChf: number
+  ): Promise<ShiftBasePayRuleRecord> {
+    const rows = await unwrap(
+      'payrollRules.correctShiftBasePayRate',
+      this.client.rpc('correct_shift_base_pay_rate', {
+        p_resort_id: resortId,
+        p_shift_type_id: shiftTypeId,
+        p_rule_id: ruleId,
+        p_new_base_pay_chf: newBasePayChf,
+      })
+    );
+    return mapCorrectShiftBasePayRateResult(rows[0]);
+  }
+
+  async correctDriverDeliveryRate(driverId: string, ruleId: string, newRateChf: number): Promise<DriverDeliveryRateRecord> {
+    const rows = await unwrap(
+      'payrollRules.correctDriverDeliveryRate',
+      this.client.rpc('correct_driver_delivery_rate', {
+        p_driver_id: driverId,
+        p_rule_id: ruleId,
+        p_new_rate_chf: newRateChf,
+      })
+    );
+    return mapCorrectDriverDeliveryRateResult(rows[0]);
   }
 }

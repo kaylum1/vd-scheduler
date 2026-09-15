@@ -151,3 +151,64 @@ describe('MockPayrollRulesRepository: driver delivery rates (Stage 2D Payroll Ch
     expect(mockDriverDeliveryRates.find((r) => r.id === 'mock-rate-gianni')?.rateChf).toBe(12);
   });
 });
+
+describe('MockPayrollRulesRepository: rate corrections (Stage 2D Payroll Checkpoint B.1)', () => {
+  beforeEach(resetMockFixturesForTesting);
+  const repo = new MockPayrollRulesRepository();
+
+  it('corrects an already-real current shift base rate in place -- same row, dates preserved, no new row', async () => {
+    const result = await repo.correctShiftBasePayRate('mock-crans-dinner', 'mock-crans', 'mock-base-pay-crans-dinner', 32);
+    expect(result).toMatchObject({ id: 'mock-base-pay-crans-dinner', basePayChf: 32, effectiveFrom: '2024-01-01', effectiveTo: null });
+    expect(await repo.listShiftBasePayRules('mock-crans')).toHaveLength(1);
+  });
+
+  it('corrects an already-real current driver rate in place', async () => {
+    const result = await repo.correctDriverDeliveryRate('mock-gianni', 'mock-rate-gianni', 13);
+    expect(result).toMatchObject({ id: 'mock-rate-gianni', rateChf: 13, effectiveFrom: '2024-01-01', effectiveTo: null });
+    expect(await repo.listDriverDeliveryRates('mock-crans')).toHaveLength(1);
+  });
+
+  it('corrects a rate set effective today, same day -- the key product requirement', async () => {
+    const set = await repo.setShiftBasePayRate('mock-zermatt-dinner', 'mock-zermatt', 13);
+    const corrected = await repo.correctShiftBasePayRate('mock-zermatt-dinner', 'mock-zermatt', set.id, 12);
+    expect(corrected).toMatchObject({ id: set.id, basePayChf: 12, effectiveFrom: set.effectiveFrom });
+  });
+
+  it('corrects a scheduled future rate before it takes effect, without touching the current rate', async () => {
+    const scheduled = await repo.setShiftBasePayRate('mock-crans-dinner', 'mock-crans', 35, futureIso(30));
+    const corrected = await repo.correctShiftBasePayRate('mock-crans-dinner', 'mock-crans', scheduled.id, 40);
+    expect(corrected).toMatchObject({ id: scheduled.id, basePayChf: 40, effectiveFrom: scheduled.effectiveFrom });
+
+    const current = (await repo.listShiftBasePayRules('mock-crans')).find((r) => r.id === 'mock-base-pay-crans-dinner')!;
+    expect(current.basePayChf).toBe(30); // untouched
+    expect(await repo.listShiftBasePayRules('mock-crans')).toHaveLength(2); // no unnecessary third row
+  });
+
+  it('rejects correcting an already-closed historical period', async () => {
+    // Close the baseline row by scheduling a genuine future change.
+    await repo.setShiftBasePayRate('mock-crans-dinner', 'mock-crans', 35, futureIso(30));
+    await expect(repo.correctShiftBasePayRate('mock-crans-dinner', 'mock-crans', 'mock-base-pay-crans-dinner', 99)).rejects.toMatchObject({
+      code: '55006',
+    });
+  });
+
+  it('rejects a negative corrected amount', async () => {
+    await expect(repo.correctShiftBasePayRate('mock-crans-dinner', 'mock-crans', 'mock-base-pay-crans-dinner', -1)).rejects.toMatchObject({
+      code: '23514',
+    });
+    await expect(repo.correctDriverDeliveryRate('mock-gianni', 'mock-rate-gianni', -1)).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('rejects an unknown rule id', async () => {
+    await expect(repo.correctShiftBasePayRate('mock-crans-dinner', 'mock-crans', 'mock-nonexistent-rule', 30)).rejects.toMatchObject({
+      code: 'P0002',
+    });
+    await expect(repo.correctDriverDeliveryRate('mock-gianni', 'mock-nonexistent-rule', 12)).rejects.toMatchObject({ code: 'P0002' });
+  });
+
+  it('never creates a new row -- correction is always an in-place amount update', async () => {
+    const before = mockShiftBasePayRules.length;
+    await repo.correctShiftBasePayRate('mock-crans-dinner', 'mock-crans', 'mock-base-pay-crans-dinner', 31);
+    expect(mockShiftBasePayRules.length).toBe(before);
+  });
+});

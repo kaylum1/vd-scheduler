@@ -383,6 +383,43 @@ a finalised pay period's lines become immutable independently of each other
 (one unresolved exception never blocks every other correct line), and the
 run they belong to is only "Finalised" once every required line is.
 
+**H. Rate correction vs. rate change — two different operations.**
+Effective dating protects historical **rate periods**; payroll finalisation
+(§G, not built yet) will eventually protect actual historical **payroll**.
+Those are not the same guarantee, and until a `driver_shift_payroll` line is
+finalised, a genuine data-entry mistake in a rate must be correctable —
+"I typed 13, I meant 12" was never a real CHF 13 period, so forcing it
+through the ordinary future-change workflow (which would require the
+manager to invent a start date *after* today and leave the erroneous value
+sitting in history) is wrong. **Change** ("schedule a future rate") and
+**Correct** ("fix a mistake in the currently-applicable rule") are
+deliberately two separate manager actions, never conflated:
+- **Change** creates a new, later-dated period and preserves the old one —
+  exactly Checkpoint B's own workflow, unchanged.
+- **Correct** updates the amount of an existing, still-*open* rule (either
+  the current one or an already-scheduled future one) **in place** —
+  `effective_from`/`effective_to` are never touched, so Rate History only
+  ever shows genuine effective periods, never a fake one-day period
+  invented to record a typo. A rate that is already real *today* (or
+  earlier) can be corrected same-day — the manager is never forced to pick
+  a future date just to fix a mistake. An already-*closed* historical
+  period (a genuine past period, not the currently-open one) is out of
+  scope for correction and is rejected.
+- **Audit, not history, records a correction.** `audit_log`'s existing
+  generic before/after capture (already attached to both rate tables) shows
+  `CHF 13 → CHF 12` on the row; Rate History shows only the corrected
+  period's own dates and final value, e.g. `CHF 12 from 15 Sep`, never a
+  phantom `CHF 13 from 15 Sep → 15 Sep` entry.
+- **Future finalisation guard (not built — no `driver_shift_payroll` exists
+  yet, so nothing to enforce today):** once a `driver_shift_payroll` line
+  has been calculated from a given rate/period and finalised, a correction
+  that would alter that finalised financial history must be rejected — the
+  financial snapshot remains authoritative once it exists; configuration
+  corrections must never reach back into it. This is a straightforward
+  additional check to add to the existing correction RPCs (query whether
+  any finalised line depends on the target rule before allowing the
+  UPDATE) — the correction workflow does not need replacing to add it.
+
 **Implemented (Stage 2D Payroll Checkpoint A):** `shift_base_pay_rules`
 (renamed from `payroll_rules`, `delivery_rate_chf` removed), `driver_delivery_rates`
 (new, mirrors the same effective-dated/no-overlap/manager-only/audited
@@ -416,3 +453,15 @@ amber "Needs setup" state rather than a fabricated CHF 0, and a compact
 formula explanation. No attendance/Onfleet/double-pay/payroll-calculation
 controls anywhere on this page — those remain future Dashboard/Payroll
 checkpoints' responsibility.
+
+**Implemented (Stage 2D Payroll Checkpoint B.1 — rate correction):** the
+atomic manager RPCs `correct_shift_base_pay_rate`/`correct_driver_delivery_rate`
+— update ONLY the amount of an existing, still-open (current or scheduled)
+rule row, identified by its own id (already known to the frontend, never
+manager-typed); reject correcting an already-closed historical period
+(55006); never touch `effective_from`/`effective_to`. `PayrollRulesRepository.
+correctShiftBasePayRate`/`correctDriverDeliveryRate`, implemented for both
+providers. `PayrollRulesPanel`'s Edit modal surfaces "Correct current rate"/
+"Correct scheduled rate" as a clearly separate action from the "Schedule
+Change" future-change form, opening a focused confirmation dialog ("Correct
+base pay/delivery rate — `<name>`") with its own audit-oriented helper text.

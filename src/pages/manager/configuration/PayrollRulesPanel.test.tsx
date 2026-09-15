@@ -157,7 +157,7 @@ describe('PayrollRulesPanel: Shift base pay', () => {
     fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Base pay'), { target: { value: '-5' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     expect(await within(dialog).findByText(/CHF 0 or more/i)).toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled();
@@ -185,7 +185,7 @@ describe('PayrollRulesPanel: Shift base pay', () => {
     let dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Base pay'), { target: { value: '35' } });
     fireEvent.change(within(dialog).getByLabelText('Changes from'), { target: { value: futureIso(30) } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     await waitFor(() => expect(within(baseRow('Dinner')).getByText(/Scheduled: CHF 35\.00 from/)).toBeInTheDocument());
     // Current is unaffected by the not-yet-real scheduled change.
@@ -199,7 +199,7 @@ describe('PayrollRulesPanel: Shift base pay', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Base pay'), { target: { value: '35' } });
     fireEvent.change(within(dialog).getByLabelText('Changes from'), { target: { value: futureIso(30) } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     await waitFor(() => expect(mockShiftBasePayRules.filter((r) => r.shiftTypeId === 'mock-crans-dinner')).toHaveLength(2));
   });
@@ -215,7 +215,7 @@ describe('PayrollRulesPanel: Shift base pay', () => {
     fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Base pay'), { target: { value: '35' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     await waitFor(() => expect(within(baseRow('Dinner')).getByRole('button', { name: 'History' })).toBeInTheDocument());
     fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'History' }));
@@ -234,7 +234,7 @@ describe('PayrollRulesPanel: Shift base pay', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Base pay'), { target: { value: '35' } });
     fireEvent.change(within(dialog).getByLabelText('Changes from'), { target: { value: futureIso(30) } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     await waitFor(() => {
       const original = mockShiftBasePayRules.find((r) => r.id === originalId)!;
@@ -280,7 +280,7 @@ describe('PayrollRulesPanel: Driver delivery rates', () => {
     fireEvent.click(within(rateRow('Gianni')).getByRole('button', { name: 'Edit' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Rate per completed delivery'), { target: { value: '99' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     fireEvent.click(await screen.findByRole('tab', { name: 'Zermatt' }));
     await screen.findByText('Alex');
@@ -294,7 +294,7 @@ describe('PayrollRulesPanel: Driver delivery rates', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Rate per completed delivery'), { target: { value: '14' } });
     fireEvent.change(within(dialog).getByLabelText('Changes from'), { target: { value: futureIso(30) } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     await waitFor(() => expect(within(rateRow('Gianni')).getByText(/Scheduled: CHF 14\.00 from/)).toBeInTheDocument());
   });
@@ -307,7 +307,7 @@ describe('PayrollRulesPanel: Driver delivery rates', () => {
     fireEvent.click(within(rateRow('Gianni')).getByRole('button', { name: 'Edit' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Rate per completed delivery'), { target: { value: '14' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Change' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
 
     await waitFor(() => expect(within(rateRow('Gianni')).getByRole('button', { name: 'History' })).toBeInTheDocument());
     fireEvent.click(within(rateRow('Gianni')).getByRole('button', { name: 'History' }));
@@ -410,5 +410,152 @@ describe('ShiftSetupPanel: zero-template vs genuinely-inconsistent Shift display
     const row = screen.getByText('Dinner').closest('.shift-setup-card') as HTMLElement;
     expect(within(row).getByText(/different times configured on different days/i)).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: 'Edit Dinner' })).toBeDisabled();
+  });
+});
+
+// =======================================================================
+// RATE CORRECTION WORKFLOW (Stage 2D Payroll Checkpoint B.1)
+// =======================================================================
+describe('PayrollRulesPanel: rate correction workflow', () => {
+  it('a "Correct current rate" action exists for Shift base pay when a current rate exists', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'Correct current rate' })).toBeInTheDocument();
+  });
+
+  it('a "Correct current rate" action exists for a driver delivery rate when a current rate exists', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(within(rateRow('Gianni')).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'Correct current rate' })).toBeInTheDocument();
+  });
+
+  it('a rate that became effective TODAY can be corrected today (the key product requirement)', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(screen.getByRole('tab', { name: 'Zermatt' }));
+    await screen.findByText('Tomas');
+    // Tomas has no rate at all -- set one effective today (the default).
+    fireEvent.click(within(rateRow('Tomas')).getByRole('button', { name: 'Set rate' }));
+    let dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Rate per completed delivery'), { target: { value: '13' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Set Rate' }));
+    await waitFor(() => expect(within(rateRow('Tomas')).getByText('CHF 13.00 / completed delivery')).toBeInTheDocument());
+
+    // Now correct it, same day.
+    fireEvent.click(within(rateRow('Tomas')).getByRole('button', { name: 'Edit' }));
+    dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Correct current rate' }));
+    const correctDialog = await screen.findByRole('dialog');
+    expect(within(correctDialog).getByRole('heading', { name: 'Correct delivery rate — Tomas' })).toBeInTheDocument();
+    fireEvent.change(within(correctDialog).getByLabelText('Correct rate'), { target: { value: '12' } });
+    fireEvent.click(within(correctDialog).getByRole('button', { name: 'Confirm Correction' }));
+
+    await waitFor(() => expect(within(rateRow('Tomas')).getByText('CHF 12.00 / completed delivery')).toBeInTheDocument());
+    // No fake history was created by this correction.
+    expect(within(rateRow('Tomas')).queryByRole('button', { name: 'History' })).not.toBeInTheDocument();
+    expect(mockDriverDeliveryRates.filter((r) => r.driverId === 'mock-tomas')).toHaveLength(1);
+  });
+
+  it('a rate that has been in effect since earlier can be explicitly corrected', async () => {
+    // mock-base-pay-crans-dinner has been active since 2024-01-01 -- a
+    // genuinely historical start date, not "today".
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
+    let dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/Since 1 January 2024/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Correct current rate' }));
+
+    const correctDialog = await screen.findByRole('dialog');
+    fireEvent.change(within(correctDialog).getByLabelText('Correct rate'), { target: { value: '32' } });
+    fireEvent.click(within(correctDialog).getByRole('button', { name: 'Confirm Correction' }));
+
+    await waitFor(() => expect(within(baseRow('Dinner')).getByText('CHF 32.00 / attended shift')).toBeInTheDocument());
+    const rule = mockShiftBasePayRules.find((r) => r.id === 'mock-base-pay-crans-dinner')!;
+    expect(rule.basePayChf).toBe(32);
+    expect(rule.effectiveFrom).toBe('2024-01-01'); // preserved exactly
+    expect(rule.effectiveTo).toBeNull();
+  });
+
+  it('a future scheduled rate can be corrected before it takes effect, without disturbing the current rate', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    // Schedule a future change first.
+    fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
+    let dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Base pay'), { target: { value: '35' } });
+    fireEvent.change(within(dialog).getByLabelText('Changes from'), { target: { value: futureIso(30) } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
+    await waitFor(() => expect(within(baseRow('Dinner')).getByText(/Scheduled: CHF 35\.00 from/)).toBeInTheDocument());
+
+    // Now correct the SCHEDULED rate specifically.
+    fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
+    dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByRole('button', { name: 'Correct current rate' })).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Correct scheduled rate' }));
+    const correctDialog = await screen.findByRole('dialog');
+    fireEvent.change(within(correctDialog).getByLabelText('Correct rate'), { target: { value: '40' } });
+    fireEvent.click(within(correctDialog).getByRole('button', { name: 'Confirm Correction' }));
+
+    await waitFor(() => expect(within(baseRow('Dinner')).getByText(/Scheduled: CHF 40\.00 from/)).toBeInTheDocument());
+    // Current remains exactly as it was -- untouched by the scheduled correction.
+    expect(within(baseRow('Dinner')).getByText('CHF 30.00 / attended shift')).toBeInTheDocument();
+    // No unnecessary third rate period was created.
+    expect(mockShiftBasePayRules.filter((r) => r.shiftTypeId === 'mock-crans-dinner')).toHaveLength(2);
+  });
+
+  it('correcting a rate never creates a fake history period', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    const before = mockShiftBasePayRules.filter((r) => r.shiftTypeId === 'mock-crans-dinner').length;
+
+    fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Correct current rate' }));
+    const correctDialog = await screen.findByRole('dialog');
+    fireEvent.change(within(correctDialog).getByLabelText('Correct rate'), { target: { value: '31' } });
+    fireEvent.click(within(correctDialog).getByRole('button', { name: 'Confirm Correction' }));
+
+    await waitFor(() => expect(within(baseRow('Dinner')).getByText('CHF 31.00 / attended shift')).toBeInTheDocument());
+    const after = mockShiftBasePayRules.filter((r) => r.shiftTypeId === 'mock-crans-dinner').length;
+    expect(after).toBe(before); // no new row -- never a fake one-day/zero-day period
+    expect(within(baseRow('Dinner')).queryByRole('button', { name: 'History' })).not.toBeInTheDocument();
+  });
+
+  it('the ordinary future Change Rate flow still behaves exactly as before (history preserved, never rewritten)', async () => {
+    const spy = vi.spyOn(MockPayrollRulesRepository.prototype, 'setShiftBasePayRate');
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Base pay'), { target: { value: '35' } });
+    fireEvent.change(within(dialog).getByLabelText('Changes from'), { target: { value: futureIso(30) } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Schedule Change' }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    const original = mockShiftBasePayRules.find((r) => r.id === 'mock-base-pay-crans-dinner')!;
+    expect(original.basePayChf).toBe(30); // untouched, exactly as Checkpoint B behaved
+    expect(original.effectiveTo).not.toBeNull(); // closed, not rewritten
+  });
+
+  it('audit-oriented helper text is shown on the correction dialog', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(within(baseRow('Dinner')).getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Correct current rate' }));
+    const correctDialog = await screen.findByRole('dialog');
+    expect(within(correctDialog).getByText(/recorded in the audit log/i)).toBeInTheDocument();
+  });
+
+  it('components do not call Supabase directly for corrections either (architecture)', () => {
+    expect(payrollRulesPanelSource).toMatch(/correctShiftBasePayRate/);
+    expect(payrollRulesPanelSource).toMatch(/correctDriverDeliveryRate/);
+    expect(payrollRulesPanelSource).not.toMatch(/supabase\s*\.\s*from\(/);
+    expect(payrollRulesPanelSource).not.toMatch(/\.rpc\(/);
   });
 });

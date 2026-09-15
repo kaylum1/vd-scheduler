@@ -1291,6 +1291,33 @@ export type Database = {
           week_start: string
         }[]
       }
+      correct_driver_delivery_rate: {
+        Args: { p_driver_id: string; p_new_rate_chf: number; p_rule_id: string }
+        Returns: {
+          driver_id: string
+          effective_from: string
+          effective_to: string
+          rate_chf: number
+          resort_id: string
+          rule_id: string
+        }[]
+      }
+      correct_shift_base_pay_rate: {
+        Args: {
+          p_new_base_pay_chf: number
+          p_resort_id: string
+          p_rule_id: string
+          p_shift_type_id: string
+        }
+        Returns: {
+          base_pay_chf: number
+          effective_from: string
+          effective_to: string
+          resort_id: string
+          rule_id: string
+          shift_type_id: string
+        }[]
+      }
       create_resort: {
         Args: { p_name: string }
         Returns: {

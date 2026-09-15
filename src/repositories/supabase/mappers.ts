@@ -54,6 +54,8 @@ type ShiftBasePayRuleRow = Database['public']['Tables']['shift_base_pay_rules'][
 type SetShiftBasePayRateRow = Database['public']['Functions']['set_shift_base_pay_rate']['Returns'][number];
 type DriverDeliveryRateRow = Database['public']['Tables']['driver_delivery_rates']['Row'];
 type SetDriverDeliveryRateRow = Database['public']['Functions']['set_driver_delivery_rate']['Returns'][number];
+type CorrectShiftBasePayRateRow = Database['public']['Functions']['correct_shift_base_pay_rate']['Returns'][number];
+type CorrectDriverDeliveryRateRow = Database['public']['Functions']['correct_driver_delivery_rate']['Returns'][number];
 type ApplyTemplateCancellationRow = Database['public']['Functions']['apply_template_cancellation']['Returns'][number];
 type CreateShiftRow = Database['public']['Functions']['create_shift']['Returns'][number];
 // revise_shift/deactivate_shift/reactivate_shift all return the same single
@@ -337,6 +339,30 @@ export function mapDriverDeliveryRate(row: DriverDeliveryRateRow): DriverDeliver
 }
 
 export function mapSetDriverDeliveryRateResult(row: SetDriverDeliveryRateRow): DriverDeliveryRateRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    driverId: row.driver_id,
+    rateChf: row.rate_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+/** Stage 2D Payroll Checkpoint B.1 -- correct_shift_base_pay_rate returns the identical row shape as set_shift_base_pay_rate. */
+export function mapCorrectShiftBasePayRateResult(row: CorrectShiftBasePayRateRow): ShiftBasePayRuleRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    shiftTypeId: row.shift_type_id,
+    basePayChf: row.base_pay_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+/** Stage 2D Payroll Checkpoint B.1 -- correct_driver_delivery_rate returns the identical row shape as set_driver_delivery_rate. */
+export function mapCorrectDriverDeliveryRateResult(row: CorrectDriverDeliveryRateRow): DriverDeliveryRateRecord {
   return {
     id: row.rule_id,
     resortId: row.resort_id,

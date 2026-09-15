@@ -136,4 +136,49 @@ export class MockPayrollRulesRepository implements PayrollRulesRepository {
     mockDriverDeliveryRates.push(created);
     return created;
   }
+
+  async correctShiftBasePayRate(
+    shiftTypeId: string,
+    resortId: string,
+    ruleId: string,
+    newBasePayChf: number
+  ): Promise<ShiftBasePayRuleRecord> {
+    const operation = 'payrollRules.correctShiftBasePayRate';
+    if (newBasePayChf == null || newBasePayChf < 0) {
+      throw new RepositoryError('Base pay cannot be negative.', { operation, code: '23514' });
+    }
+    const rule = mockShiftBasePayRules.find((r) => r.id === ruleId && r.shiftTypeId === shiftTypeId && r.resortId === resortId);
+    if (!rule) {
+      throw new RepositoryError('That base-pay rate could not be found for this Shift.', { operation, code: 'P0002' });
+    }
+    if (rule.effectiveTo !== null) {
+      throw new RepositoryError('Only the current or an upcoming scheduled rate can be corrected here -- a closed historical period is not editable.', {
+        operation,
+        code: '55006',
+      });
+    }
+    // Amount only -- effective_from/effective_to are never touched, so
+    // History never gains a fake period from a correction (Checkpoint B.1 §7).
+    rule.basePayChf = newBasePayChf;
+    return { ...rule };
+  }
+
+  async correctDriverDeliveryRate(driverId: string, ruleId: string, newRateChf: number): Promise<DriverDeliveryRateRecord> {
+    const operation = 'payrollRules.correctDriverDeliveryRate';
+    if (newRateChf == null || newRateChf < 0) {
+      throw new RepositoryError('Delivery rate cannot be negative.', { operation, code: '23514' });
+    }
+    const rule = mockDriverDeliveryRates.find((r) => r.id === ruleId && r.driverId === driverId);
+    if (!rule) {
+      throw new RepositoryError('That delivery rate could not be found for this driver.', { operation, code: 'P0002' });
+    }
+    if (rule.effectiveTo !== null) {
+      throw new RepositoryError('Only the current or an upcoming scheduled rate can be corrected here -- a closed historical period is not editable.', {
+        operation,
+        code: '55006',
+      });
+    }
+    rule.rateChf = newRateChf;
+    return { ...rule };
+  }
 }

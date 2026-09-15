@@ -74,8 +74,9 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `80_resort_lifecycle.sql` | `create_resort`/`deactivate_resort`/`reactivate_resort` atomicity, dependency-blocked deactivation, history preservation, security, audit (Stage 2D Checkpoint 4.1) |
 | `90_payroll_rate_foundations.sql` | `shift_base_pay_rules`/`driver_delivery_rates` effective dating, overlap prevention, historical-safe resolution, security, audit (Stage 2D Payroll Checkpoint A) |
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
+| `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of Stage 2D Payroll Checkpoint B this suite has **285 assertions**. That
+As of Stage 2D Payroll Checkpoint B.1 this suite has **308 assertions**. That
 number will keep changing as the suite grows — don't chase a specific
 count; the point is that it stays genuinely comprehensive and, unlike its
 scratchpad predecessor, that it survives.

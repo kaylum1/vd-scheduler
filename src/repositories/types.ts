@@ -255,4 +255,17 @@ export interface PayrollRulesRepository {
    * client-supplied.
    */
   setDriverDeliveryRate(driverId: string, rateChf: number, effectiveFrom?: string): Promise<DriverDeliveryRateRecord>;
+
+  /**
+   * Atomic (correct_shift_base_pay_rate), Stage 2D Payroll Checkpoint B.1.
+   * A deliberate, distinct action from setShiftBasePayRate: fixes a
+   * data-entry MISTAKE on an existing, still-open (current or scheduled)
+   * rule -- updates its amount only, never its effective_from/effective_to,
+   * so it can never fabricate a fake historical period. `ruleId` is the
+   * target row's own id (already known from listShiftBasePayRules, never
+   * manager-typed). Rejects correcting an already-closed historical period.
+   */
+  correctShiftBasePayRate(shiftTypeId: string, resortId: string, ruleId: string, newBasePayChf: number): Promise<ShiftBasePayRuleRecord>;
+  /** Atomic (correct_driver_delivery_rate). Same shape as correctShiftBasePayRate, keyed by driver instead of Shift. */
+  correctDriverDeliveryRate(driverId: string, ruleId: string, newRateChf: number): Promise<DriverDeliveryRateRecord>;
 }
