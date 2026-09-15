@@ -270,20 +270,18 @@ describe('Stage 2D Checkpoint 4: atomic shift RPC response mapping', () => {
 });
 
 describe('Stage 2C RPC response mapping', () => {
-  it('maps materialise_shift_instances(), including the Stage 2D Checkpoint 3 missing-rota-rule count -- no missing-payroll-rule count exists any more (Stage 2D Payroll Checkpoint A)', () => {
+  it('maps materialise_shift_instances() -- no missing-rota-rule or missing-payroll-rule count exists any more (Stage 2D staffing simplification / Payroll Checkpoint A)', () => {
     const mapped = mapMaterialiseShiftsResult({
       created_count: 5,
       skipped_existing_count: 2,
       from_date: '2024-01-01',
       to_date: '2024-02-29',
-      missing_rota_rule_count: 3,
     });
     expect(mapped).toEqual({
       createdCount: 5,
       skippedExistingCount: 2,
       fromDate: '2024-01-01',
       toDate: '2024-02-29',
-      missingRotaRuleCount: 3,
     });
   });
 

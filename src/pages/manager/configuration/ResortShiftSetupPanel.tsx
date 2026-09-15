@@ -281,7 +281,7 @@ function DeactivateResortDialog({
       message={
         <>
           <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
-            <li>{resort.name} will disappear from normal active resort selectors (Shift Setup, Drivers, and later Rota/Payroll/Rota Rules).</li>
+            <li>{resort.name} will disappear from normal active resort selectors (Shift Setup, Drivers, Payroll Rules, and later Rota).</li>
             <li>Historical data is retained — drivers, shifts, assignments, payroll records, and audit history are unaffected.</li>
             <li>Nothing is deleted.</li>
           </ul>

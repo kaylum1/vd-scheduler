@@ -77,7 +77,7 @@ declare
 begin
   select shift_type_id into v_shift_type_id from create_shift(
     v_resort_id, 'Core Schema Test Shift', '09:00'::time, '11:00'::time,
-    array[0]::smallint[], '2027-02-01'::date, null
+    array[0]::smallint[], 1, '2027-02-01'::date, null
   );
   perform set_config('dbtest.core_schema_shift_type', v_shift_type_id::text, false);
 
@@ -86,8 +86,8 @@ end $$;
 
 select pg_temp.expect_error('shift_instances: UNIQUE(resort_id, shift_type_id, date) rejects a raw duplicate insert (23505)',
   format(
-    'insert into shift_instances (resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, status, origin) ' ||
-    'select resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, ''active'', ''adhoc'' ' ||
+    'insert into shift_instances (resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, required_drivers, status, origin) ' ||
+    'select resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, required_drivers, ''active'', ''adhoc'' ' ||
     'from shift_instances where resort_id = %L and shift_type_id = %L and date = %L',
     current_setting('dbtest.resort_a'), current_setting('dbtest.core_schema_shift_type'), '2027-02-01'
   ),
@@ -107,7 +107,7 @@ select pg_temp.expect_error('shift_instances: date is immutable (23514)',
 -- ---------------------------------------------------------------------
 select pg_temp.expect_error('shift_templates: overlapping active periods for the same shift type + weekday rejected (23P01)',
   format(
-    'insert into shift_templates (resort_id, shift_type_id, weekday, start_time, end_time, effective_from) values (%L, %L, 0, %L, %L, %L)',
+    'insert into shift_templates (resort_id, shift_type_id, weekday, start_time, end_time, required_drivers, effective_from) values (%L, %L, 0, %L, %L, 1, %L)',
     current_setting('dbtest.resort_a'), current_setting('dbtest.core_schema_shift_type'), '06:00', '07:00', '2027-02-10'
   ),
   '23P01');

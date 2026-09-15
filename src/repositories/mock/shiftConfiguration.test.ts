@@ -61,43 +61,56 @@ describe('MockShiftConfigurationRepository: createShift (Stage 2D Checkpoint 4)'
       startTime: '12:00',
       endTime: '14:30',
       weekdays: [5, 6],
+      requiredDrivers: 1,
       effectiveFrom: '2026-01-01',
     });
     const shifts = await repo.listShifts('mock-crans');
     const lunch = shifts.find((s) => s.shiftTypeId === shiftTypeId);
-    expect(lunch?.schedule).toMatchObject({ startTime: '12:00', endTime: '14:30', weekdays: [5, 6] });
+    expect(lunch?.schedule).toMatchObject({ startTime: '12:00', endTime: '14:30', weekdays: [5, 6], requiredDrivers: 1 });
   });
 
   it('generates the internal key from the name without ever asking the caller for one, and disambiguates a collision', async () => {
-    const first = await repo.createShift('mock-verbier', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [0] });
-    const second = await repo.createShift('mock-verbier', { name: 'Dinner', startTime: '19:00', endTime: '22:00', weekdays: [1] });
+    const first = await repo.createShift('mock-verbier', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [0], requiredDrivers: 1 });
+    const second = await repo.createShift('mock-verbier', { name: 'Dinner', startTime: '19:00', endTime: '22:00', weekdays: [1], requiredDrivers: 1 });
     expect(first.shiftTypeId).not.toBe(second.shiftTypeId);
     // Both succeed -- no manager-facing "key already used" rejection, unlike the old per-shift-type UI.
   });
 
   it('rejects an empty weekday selection', async () => {
-    await expect(repo.createShift('mock-crans', { name: 'Breakfast', startTime: '08:00', endTime: '09:00', weekdays: [] })).rejects.toMatchObject({
-      code: '23514',
-    });
+    await expect(
+      repo.createShift('mock-crans', { name: 'Breakfast', startTime: '08:00', endTime: '09:00', weekdays: [], requiredDrivers: 1 })
+    ).rejects.toMatchObject({ code: '23514' });
   });
 
   it('rejects a blank name', async () => {
-    await expect(repo.createShift('mock-crans', { name: '  ', startTime: '08:00', endTime: '09:00', weekdays: [0] })).rejects.toMatchObject({
-      code: '23514',
-    });
+    await expect(
+      repo.createShift('mock-crans', { name: '  ', startTime: '08:00', endTime: '09:00', weekdays: [0], requiredDrivers: 1 })
+    ).rejects.toMatchObject({ code: '23514' });
   });
 
   it('rejects end time not after start time', async () => {
-    await expect(repo.createShift('mock-crans', { name: 'Breakfast', startTime: '09:00', endTime: '08:00', weekdays: [0] })).rejects.toMatchObject({
-      code: '23514',
-    });
+    await expect(
+      repo.createShift('mock-crans', { name: 'Breakfast', startTime: '09:00', endTime: '08:00', weekdays: [0], requiredDrivers: 1 })
+    ).rejects.toMatchObject({ code: '23514' });
   });
 
-  it('never accepts pay/required-drivers/high-value inputs (not part of ShiftScheduleInput at all)', async () => {
-    const { shiftTypeId } = await repo.createShift('mock-crans', { name: 'Breakfast', startTime: '08:00', endTime: '09:00', weekdays: [0] });
+  it('requires required_drivers (Stage 2D staffing simplification): 0 is rejected', async () => {
+    await expect(
+      repo.createShift('mock-crans', { name: 'Breakfast', startTime: '08:00', endTime: '09:00', weekdays: [0], requiredDrivers: 0 })
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('stores the required staffing count on the assembled Shift, never pay/high-value (still not part of ShiftScheduleInput at all)', async () => {
+    const { shiftTypeId } = await repo.createShift('mock-crans', {
+      name: 'Breakfast',
+      startTime: '08:00',
+      endTime: '09:00',
+      weekdays: [0],
+      requiredDrivers: 2,
+    });
     const shift = (await repo.listShifts('mock-crans')).find((s) => s.shiftTypeId === shiftTypeId);
+    expect(shift?.schedule?.requiredDrivers).toBe(2);
     expect(shift?.schedule).not.toHaveProperty('basePayChf');
-    expect(shift?.schedule).not.toHaveProperty('requiredDrivers');
     expect(shift?.schedule).not.toHaveProperty('isPremium');
   });
 });
@@ -112,25 +125,45 @@ describe('MockShiftConfigurationRepository: reviseShift (Stage 2D Checkpoint 4)'
       startTime: '18:30',
       endTime: '22:00',
       weekdays: [0, 5, 6],
+      requiredDrivers: 2,
       effectiveFrom: '2026-06-01',
     });
     const shift = (await repo.listShifts('mock-crans')).find((s) => s.shiftTypeId === 'mock-crans-dinner');
     expect(shift).toMatchObject({
       name: 'Dinner Service',
-      schedule: { startTime: '18:30', endTime: '22:00', weekdays: [0, 5, 6], effectiveFrom: '2026-06-01' },
+      schedule: { startTime: '18:30', endTime: '22:00', weekdays: [0, 5, 6], effectiveFrom: '2026-06-01', requiredDrivers: 2 },
     });
+  });
+
+  it('changing the required staffing count is supported through the same versioned revision', async () => {
+    await repo.reviseShift('mock-crans-dinner', 'mock-crans', {
+      name: 'Dinner',
+      startTime: '18:00',
+      endTime: '21:30',
+      weekdays: [0],
+      requiredDrivers: 3,
+      effectiveFrom: '2026-06-01',
+    });
+    const shift = (await repo.listShifts('mock-crans')).find((s) => s.shiftTypeId === 'mock-crans-dinner');
+    expect(shift?.schedule?.requiredDrivers).toBe(3);
   });
 
   it('rejects revising an inactive shift (must be reactivated first)', async () => {
     await repo.deactivateShift('mock-crans-dinner', 'mock-crans', '2026-01-01');
     await expect(
-      repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [0] })
+      repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [0], requiredDrivers: 2 })
     ).rejects.toMatchObject({ code: '55006' });
   });
 
   it('rejects an empty weekday selection', async () => {
     await expect(
-      repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [] })
+      repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [], requiredDrivers: 2 })
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('rejects required_drivers = 0', async () => {
+    await expect(
+      repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [0], requiredDrivers: 0 })
     ).rejects.toMatchObject({ code: '23514' });
   });
 });
@@ -154,12 +187,13 @@ describe('MockShiftConfigurationRepository: deactivateShift / reactivateShift (S
       startTime: '19:00',
       endTime: '22:00',
       weekdays: [2, 3],
+      requiredDrivers: 1,
       effectiveFrom: '2026-06-01',
     });
     const shift = (await repo.listShifts('mock-crans')).find((s) => s.shiftTypeId === 'mock-crans-dinner');
     expect(shift).toMatchObject({
       isActive: true,
-      schedule: { startTime: '19:00', endTime: '22:00', weekdays: [2, 3], effectiveFrom: '2026-06-01' },
+      schedule: { startTime: '19:00', endTime: '22:00', weekdays: [2, 3], effectiveFrom: '2026-06-01', requiredDrivers: 1 },
     });
   });
 
@@ -171,8 +205,8 @@ describe('MockShiftConfigurationRepository: deactivateShift / reactivateShift (S
     // incorrectly pull Monday's long-retired row back in, since it happens
     // to share that date -- updatedAt (a distinct transaction/call each
     // time) is what correctly tells the two retirement events apart.
-    await repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:30', weekdays: [0, 5], effectiveFrom: '2026-01-01' });
-    await repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:30', weekdays: [5], effectiveFrom: '2026-02-01' });
+    await repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:30', weekdays: [0, 5], requiredDrivers: 2, effectiveFrom: '2026-01-01' });
+    await repo.reviseShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:30', weekdays: [5], requiredDrivers: 2, effectiveFrom: '2026-02-01' });
     await repo.deactivateShift('mock-crans-dinner', 'mock-crans', '2026-02-01');
 
     const shift = (await repo.listShifts('mock-crans')).find((s) => s.shiftTypeId === 'mock-crans-dinner');
@@ -181,7 +215,7 @@ describe('MockShiftConfigurationRepository: deactivateShift / reactivateShift (S
 
   it('reactivateShift rejects a shift that is already active', async () => {
     await expect(
-      repo.reactivateShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [0] })
+      repo.reactivateShift('mock-crans-dinner', 'mock-crans', { name: 'Dinner', startTime: '18:00', endTime: '21:00', weekdays: [0], requiredDrivers: 2 })
     ).rejects.toMatchObject({ code: '23514' });
   });
 });

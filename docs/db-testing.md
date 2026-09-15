@@ -69,17 +69,17 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `35_driver_safe_views.sql` | `driver_visible_shifts` / `driver_visible_assignments` — the driver-facing security boundary views |
 | `40_materialisation_template_safety.sql` | Insert-only + idempotent materialisation, effective template selection, override/adhoc/published/attendance refresh protection, cancellation preview/apply, operational timezone + DST |
 | `50_language_onfleet.sql` | `preferred_language`, Onfleet mapping uniqueness/atomicity |
-| `60_payroll_rota_rules.sql` | `rota_rules_*` effective dating, precedence (date > weekday > default), missing-config behaviour, and proof that `materialise_shift_instances` has zero payroll-rate responsibility (Stage 2D Checkpoint 3; decoupling proof added Payroll Checkpoint A) |
+| `60_shift_staffing.sql` | `required_drivers` mandatory on `shift_templates`/`create_shift`/`revise_shift`/`reactivate_shift`, two separately-named Shifts with different staffing and no overlap conflict, direct materialisation (no rota-rule join), history preservation across a staffing revision, and proof the old `rota_rules_*` tables/counts are gone entirely (Stage 2D staffing simplification, replacing the abandoned Checkpoint 3 Rota Rules design) |
 | `70_atomic_shift_rpcs.sql` | `create_shift`/`revise_shift`/`deactivate_shift`/`reactivate_shift` atomicity, history preservation, security, audit (Stage 2D Checkpoint 3) |
 | `80_resort_lifecycle.sql` | `create_resort`/`deactivate_resort`/`reactivate_resort` atomicity, dependency-blocked deactivation, history preservation, security, audit (Stage 2D Checkpoint 4.1) |
 | `90_payroll_rate_foundations.sql` | `shift_base_pay_rules`/`driver_delivery_rates` effective dating, overlap prevention, historical-safe resolution, security, audit (Stage 2D Payroll Checkpoint A) |
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
 | `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of Stage 2D Payroll Checkpoint B.1 this suite has **308 assertions**. That
-number will keep changing as the suite grows — don't chase a specific
-count; the point is that it stays genuinely comprehensive and, unlike its
-scratchpad predecessor, that it survives.
+As of the Stage 2D staffing simplification this suite has **309
+assertions**. That number will keep changing as the suite grows — don't
+chase a specific count; the point is that it stays genuinely comprehensive
+and, unlike its scratchpad predecessor, that it survives.
 
 ## Adding a new group
 

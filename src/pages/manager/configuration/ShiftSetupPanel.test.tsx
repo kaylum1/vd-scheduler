@@ -72,6 +72,7 @@ describe('ShiftSetupPanel: display (manager-facing "Shift", not shift type/templ
       startTime: '12:00',
       endTime: '14:30',
       weekdays: [5, 6],
+      requiredDrivers: 1,
       effectiveFrom: '2026-01-01',
     });
     renderPanel();
@@ -106,10 +107,11 @@ describe('ShiftSetupPanel: display (manager-facing "Shift", not shift type/templ
     expect(within(shiftSetupCard()).queryByText(/CHF/)).not.toBeInTheDocument();
   });
 
-  it('7. required drivers / headcount is never shown', async () => {
+  it('7. required drivers is shown clearly on the Shift card (Stage 2D staffing simplification)', async () => {
     renderPanel();
     await screen.findByText('Dinner');
-    expect(within(shiftSetupCard()).queryByText(/\d+\s*drivers?\b/i)).not.toBeInTheDocument();
+    // The baseline fixture's Dinner Shift is configured for 2 drivers.
+    expect(within(shiftSetupCard()).getByText('2 drivers required')).toBeInTheDocument();
   });
 
   it('8. high-value / premium is never shown', async () => {
@@ -132,7 +134,7 @@ describe('ShiftSetupPanel: display (manager-facing "Shift", not shift type/templ
 // CREATE
 // =======================================================================
 describe('ShiftSetupPanel: Add Shift', () => {
-  it('10/13. the Add Shift form contains only the approved fields -- no key, pay, headcount, or high-value', async () => {
+  it('10/13. the Add Shift form contains only the approved fields -- Drivers required, but no key, pay, or high-value', async () => {
     renderPanel();
     await screen.findByText('Dinner');
     fireEvent.click(screen.getByRole('button', { name: /Add Shift/i }));
@@ -142,15 +144,32 @@ describe('ShiftSetupPanel: Add Shift', () => {
     expect(within(dialog).getByLabelText('Start time')).toBeInTheDocument();
     expect(within(dialog).getByLabelText('End time')).toBeInTheDocument();
     expect(within(dialog).getByText('Repeats')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Drivers required')).toBeInTheDocument();
     expect(within(dialog).getByText('Starts')).toBeInTheDocument();
     expect(within(dialog).getByText('Ends')).toBeInTheDocument();
 
     expect(within(dialog).queryByLabelText(/key/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/base pay/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/delivery rate/i)).not.toBeInTheDocument();
-    expect(within(dialog).queryByText(/required drivers/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/high-value/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/rota rule/i)).not.toBeInTheDocument();
     expect(within(dialog).queryByText(/timezone/i)).not.toBeInTheDocument();
+  });
+
+  it('a manager-facing validation message is shown for fewer than 1 driver, and Drivers required defaults to 1', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(screen.getByRole('button', { name: /Add Shift/i }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Drivers required')).toHaveValue(1);
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Breakfast' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Mon' }));
+    fireEvent.change(within(dialog).getByLabelText('Drivers required'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Shift' }));
+
+    expect(await screen.findByText('At least 1 driver is required.')).toBeInTheDocument();
   });
 
   it('11. selecting several weekdays and submitting invokes createShift exactly once, with the whole weekday set', async () => {
@@ -164,7 +183,10 @@ describe('ShiftSetupPanel: Add Shift', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Shift' }));
 
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
-    expect(spy).toHaveBeenCalledWith('mock-crans', expect.objectContaining({ name: 'Late Dinner', weekdays: expect.arrayContaining([0, 1, 2, 3, 4, 5, 6]) }));
+    expect(spy).toHaveBeenCalledWith(
+      'mock-crans',
+      expect.objectContaining({ name: 'Late Dinner', weekdays: expect.arrayContaining([0, 1, 2, 3, 4, 5, 6]), requiredDrivers: 1 })
+    );
   });
 
   it('12. an empty weekday selection is rejected before any repository call', async () => {
@@ -205,10 +227,25 @@ describe('ShiftSetupPanel: Edit Shift', () => {
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Dinner');
     expect(within(dialog).getByLabelText('Start time')).toHaveValue('18:00');
     expect(within(dialog).getByLabelText('End time')).toHaveValue('21:30');
+    expect(within(dialog).getByLabelText('Drivers required')).toHaveValue(2); // baseline fixture is configured for 2 drivers
     expect(within(dialog).getByRole('button', { name: 'Mon' })).toHaveAttribute('aria-pressed', 'true');
     // Only one start/end time pair exists in the whole form -- never a
     // per-weekday time field.
     expect(within(dialog).getAllByLabelText('Start time')).toHaveLength(1);
+  });
+
+  it('changing the required staffing count is supported and preserves history through the same versioned Shift', async () => {
+    const spy = vi.spyOn(MockShiftConfigurationRepository.prototype, 'reviseShift');
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Dinner' }));
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Drivers required'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+    expect(spy).toHaveBeenCalledWith('mock-crans-dinner', 'mock-crans', expect.objectContaining({ requiredDrivers: 3 }));
   });
 
   it('16. renaming the display name is supported', async () => {
@@ -419,13 +456,12 @@ describe('ShiftSetupPanel: Reactivate Shift', () => {
 // MATERIALISATION
 // =======================================================================
 describe('ShiftSetupPanel: Generate upcoming shifts', () => {
-  it('32/33/34. a missing Rota Rule count is shown as an informational notice, never a generation failure -- and shift generation never mentions Payroll Rules at all (Stage 2D Payroll Checkpoint A)', async () => {
+  it('32/33/34. generation reports created/skipped counts, never mentions Rota Rules or Payroll Rules (both concepts removed/independent -- Stage 2D staffing simplification)', async () => {
     vi.spyOn(MockShiftConfigurationRepository.prototype, 'materialiseShifts').mockResolvedValue({
       createdCount: 42,
       skippedExistingCount: 14,
       fromDate: '2026-01-01',
       toDate: '2026-02-28',
-      missingRotaRuleCount: 10,
     });
 
     renderPanel();
@@ -434,7 +470,7 @@ describe('ShiftSetupPanel: Generate upcoming shifts', () => {
 
     expect(await screen.findByText(/42 shifts created/)).toBeInTheDocument();
     expect(screen.getByText(/14 already existed/)).toBeInTheDocument();
-    expect(screen.getByText(/10 shifts have no Rota Rule configured/)).toBeInTheDocument();
+    expect(screen.queryByText(/Rota Rule/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Payroll Rule/)).not.toBeInTheDocument();
     // Not a failure state -- no error notice/role=alert rendered for this outcome.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -445,7 +481,7 @@ describe('ShiftSetupPanel: Generate upcoming shifts', () => {
 // REFRESH
 // =======================================================================
 describe('ShiftSetupPanel: Review schedule updates', () => {
-  it('35/36. the preview shows only schedule fields (name/time), no pay/headcount/high-value remnants', async () => {
+  it('35/36. the preview shows schedule fields (name/time) and staffing changes, no pay/high-value remnants', async () => {
     vi.spyOn(MockShiftConfigurationRepository.prototype, 'previewTemplateRefresh').mockResolvedValue([
       {
         shiftInstanceId: 'si1',
@@ -468,8 +504,33 @@ describe('ShiftSetupPanel: Review schedule updates', () => {
 
     expect(await screen.findByText(/Name: Dinner → Dinner Service/)).toBeInTheDocument();
     expect(screen.queryByText(/Base pay/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Required drivers/)).not.toBeInTheDocument();
     expect(screen.queryByText(/High-value/)).not.toBeInTheDocument();
+  });
+
+  it('a required_drivers change (Stage 2D staffing simplification) is shown in the preview, labelled "Drivers required"', async () => {
+    vi.spyOn(MockShiftConfigurationRepository.prototype, 'previewTemplateRefresh').mockResolvedValue([
+      {
+        shiftInstanceId: 'si1',
+        date: '2026-02-07',
+        shiftTypeId: 'mock-crans-dinner',
+        shiftKey: 'dinner',
+        name: 'Dinner',
+        currentTemplateId: 'old-tpl',
+        newTemplateId: 'new-tpl',
+        willChange: true,
+        changedFields: { required_drivers: { old: 1, new: 2 } },
+        assignmentCount: 0,
+        timeWouldChange: false,
+      },
+    ]);
+
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(screen.getByRole('button', { name: 'Review schedule updates' }));
+
+    expect(await screen.findByText(/Drivers required: 1 → 2/)).toBeInTheDocument();
+    // A staffing-only change must never claim it will reopen availability.
+    expect(screen.queryByText(/reopen confirmed driver availability/i)).not.toBeInTheDocument();
   });
 
   it('37. a start/end time change still shows the availability-reopen warning', async () => {

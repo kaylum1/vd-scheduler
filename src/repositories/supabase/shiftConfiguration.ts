@@ -86,6 +86,7 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
         p_start_time: input.startTime,
         p_end_time: input.endTime,
         p_weekdays: input.weekdays,
+        p_required_drivers: input.requiredDrivers,
         p_effective_from: input.effectiveFrom,
         p_effective_to: input.effectiveTo,
       })
@@ -103,6 +104,7 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
         p_start_time: input.startTime,
         p_end_time: input.endTime,
         p_weekdays: input.weekdays,
+        p_required_drivers: input.requiredDrivers,
         p_effective_from: input.effectiveFrom,
         p_effective_to: input.effectiveTo,
       })
@@ -127,6 +129,7 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
         p_start_time: input.startTime,
         p_end_time: input.endTime,
         p_weekdays: input.weekdays,
+        p_required_drivers: input.requiredDrivers,
         p_effective_from: input.effectiveFrom,
         p_effective_to: input.effectiveTo,
       })

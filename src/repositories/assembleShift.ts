@@ -26,7 +26,8 @@
  *     it). `updated_at` (a timestamptz) disambiguates them.
  *
  * CONSISTENCY: those "current" rows must all share the same start/end
- * time AND the same effective period for `schedule` to be populated.
+ * time, the same required_drivers, AND the same effective period for
+ * `schedule` to be populated.
  * Under the simplified UI's own atomic RPCs this always holds (every
  * weekday in a create/revise/reactivate call is written with the same
  * time and effective_from in one transaction) -- inconsistency can only
@@ -65,7 +66,9 @@ export function assembleShift(shiftType: ShiftTypeRecord, templates: ShiftTempla
     return { ...base, schedule: null };
   }
 
-  const distinctShapes = new Set(relevant.map((t) => `${t.startTime}|${t.endTime}|${t.effectiveFrom}|${t.effectiveTo ?? ''}`));
+  const distinctShapes = new Set(
+    relevant.map((t) => `${t.startTime}|${t.endTime}|${t.effectiveFrom}|${t.effectiveTo ?? ''}|${t.requiredDrivers ?? ''}`)
+  );
   if (distinctShapes.size > 1) {
     return {
       ...base,
@@ -80,6 +83,11 @@ export function assembleShift(shiftType: ShiftTypeRecord, templates: ShiftTempla
     weekdays: [...new Set(relevant.map((t) => t.weekday))].sort((a, b) => a - b),
     effectiveFrom: relevant[0].effectiveFrom,
     effectiveTo: relevant[0].effectiveTo,
+    // requiredDrivers is mandatory on every row written since the Stage 2D
+    // staffing simplification -- the `?? 1` only guards legacy pre-
+    // simplification rows that predate the NOT NULL constraint (never a
+    // silently-guessed value for a row created through today's RPCs).
+    requiredDrivers: relevant[0].requiredDrivers ?? 1,
   };
   return { ...base, schedule };
 }

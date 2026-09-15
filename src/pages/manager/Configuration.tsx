@@ -1,13 +1,10 @@
 import React, { useState } from 'react';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { Card, CardHeader } from '../../components/ui/Card';
-import { EmptyState } from '../../components/ui/EmptyState';
-import { IconCalendar } from '../../components/ui/icons';
 import { DriversPanel } from './configuration/DriversPanel';
 import { ResortShiftSetupPanel } from './configuration/ResortShiftSetupPanel';
 import { PayrollRulesPanel } from './configuration/PayrollRulesPanel';
 
-type Tab = 'drivers' | 'resort-shift-setup' | 'payroll-rules' | 'rota-rules';
+type Tab = 'drivers' | 'resort-shift-setup' | 'payroll-rules';
 
 export function ConfigurationPage() {
   const [tab, setTab] = useState<Tab>('drivers');
@@ -35,25 +32,11 @@ export function ConfigurationPage() {
         >
           Payroll Rules
         </button>
-        <button className={`config-section-tabs__tab${tab === 'rota-rules' ? ' is-active' : ''}`} onClick={() => setTab('rota-rules')}>
-          Rota Rules
-        </button>
       </div>
 
       {tab === 'drivers' && <DriversPanel />}
       {tab === 'resort-shift-setup' && <ResortShiftSetupPanel />}
       {tab === 'payroll-rules' && <PayrollRulesPanel />}
-
-      {tab === 'rota-rules' && (
-        <Card>
-          <CardHeader title="Rota rules" />
-          <EmptyState
-            icon={<IconCalendar />}
-            title="Coming in a later stage"
-            hint="Configure normal staffing requirements and high-value shifts. Not available yet — until then, generated shifts show a Needs Attention notice for any missing staffing."
-          />
-        </Card>
-      )}
     </div>
   );
 }

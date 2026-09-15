@@ -39,15 +39,15 @@ describe('coverageTone / coverageLabel: uncovered styling requires a real, exist
 });
 
 /**
- * Stage 2D Checkpoint 3, product rule (docs/business-rules.md §A): a real
- * shift_instance with required_drivers = NULL means "staffing not
- * configured" (no applicable rota_rules_* row at materialisation time) — a
- * third, distinct coverage state from both "no service" (no instance at
- * all) and "uncovered" (a real, configured requirement that isn't met).
- * Never conflate it with either: it must not read as a red staffing
- * shortfall, and it must not be silently treated as "0 required".
+ * Legacy defensive fallback only (docs/business-rules.md §A): required_drivers
+ * became mandatory at Shift-creation time in the Stage 2D staffing
+ * simplification, so a normal materialised instance can never actually be
+ * NULL any more. This branch exists only for any pre-simplification data
+ * that predates that constraint -- never conflate it with "no service" (no
+ * instance at all) or "uncovered" (a real, configured requirement that
+ * isn't met).
  */
-describe('coverageTone / coverageLabel: staffing not configured (required = null)', () => {
+describe('coverageTone / coverageLabel: legacy "staffing not configured" fallback (required = null)', () => {
   it('is amber / "Staffing not configured", regardless of how many drivers happen to be assigned', () => {
     expect(coverageTone(0, null)).toBe('amber');
     expect(coverageLabel(0, null)).toBe('Staffing not configured');

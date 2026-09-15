@@ -124,7 +124,7 @@ declare
   v_shift_type_id uuid;
 begin
   select shift_type_id into v_shift_type_id from create_shift(
-    current_setting('dbtest.blocked_resort_id')::uuid, 'Blocking Shift', '09:00'::time, '10:00'::time, array[0]::smallint[], '2026-12-01'::date, null
+    current_setting('dbtest.blocked_resort_id')::uuid, 'Blocking Shift', '09:00'::time, '10:00'::time, array[0]::smallint[], 1, '2026-12-01'::date, null
   );
   perform set_config('dbtest.blocking_shift_type_id', v_shift_type_id::text, false);
 end $$;

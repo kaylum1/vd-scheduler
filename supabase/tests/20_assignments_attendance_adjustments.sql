@@ -9,14 +9,13 @@ declare
   v_shift_type_id uuid;
   v_second_driver_a uuid;
 begin
+  -- A real required_drivers (1), so the over-assignment assertion below
+  -- compares against a genuine configured number -- staffing lives on the
+  -- Shift itself now, no separate rota-rule row needed.
   select shift_type_id into v_shift_type_id from create_shift(
     v_resort_id, 'Assignments Test Shift', '09:00'::time, '13:00'::time,
-    array[0]::smallint[], '2027-04-05'::date, null -- 2027-04-05 is a Monday
+    array[0]::smallint[], 1, '2027-04-05'::date, null -- 2027-04-05 is a Monday
   );
-  -- A real (non-NULL) required_drivers, so the over-assignment assertion
-  -- below compares against a genuine configured number.
-  insert into rota_rules_default (resort_id, shift_type_id, required_drivers, is_premium, effective_from)
-  values (v_resort_id, v_shift_type_id, 1, false, '2027-04-01');
   perform materialise_shift_instances(v_resort_id, '2027-04-05'::date, '2027-04-05'::date);
   perform set_config('dbtest.assign_shift_id',
     (select id::text from shift_instances where shift_type_id = v_shift_type_id and date = '2027-04-05'), false);

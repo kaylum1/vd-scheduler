@@ -62,9 +62,12 @@ export interface ShiftTypeRecord {
 }
 
 /**
- * requiredDrivers/basePayChf/deliveryRateChf/isPremium are DEPRECATED
- * (Stage 2D Checkpoint 3): staffing now belongs to rota_rules_*, pay to
- * payroll_rules. Nullable here purely because the DB columns are nullable.
+ * requiredDrivers is authoritative again (Stage 2D staffing simplification)
+ * -- mandatory (>= 1) on every row written through the atomic RPCs.
+ * basePayChf/deliveryRateChf/isPremium remain DEPRECATED/inert: pay belongs
+ * to shift_base_pay_rules/driver_delivery_rates, and high-value/fairness is
+ * not part of the V1 product model. Nullable here purely because the DB
+ * columns are nullable.
  *
  * INTERNAL AS OF CHECKPOINT 4: this is the raw per-weekday database row --
  * `listShiftTemplates` still returns it (used internally to assemble
@@ -134,18 +137,22 @@ export interface ShiftScheduleRecord {
   weekdays: number[];
   effectiveFrom: string;
   effectiveTo: string | null;
+  /** Authoritative staffing requirement for this Shift (Stage 2D staffing simplification). Always >= 1 -- mandatory at Shift-creation time, never null on an assembled schedule. */
+  requiredDrivers: number;
 }
 
 /**
  * Manager-side, full-fidelity shift instance -- a purely operational
- * schedule/staffing/high-value record. Never expose this shape to a driver
- * session -- that's what DriverVisibleShift is for.
+ * schedule/staffing record. Never expose this shape to a driver session --
+ * that's what DriverVisibleShift is for.
  *
- * requiredDrivers/isPremium are nullable as of Stage 2D Checkpoint 3: NULL
- * means "not configured" (no applicable rota_rules_* row at materialisation
- * time) — a distinct "Needs Attention" state, never coalesced to 0/false.
- * See coverageTone/coverageLabel in components/ui/StatusPill.tsx and
- * docs/business-rules.md.
+ * requiredDrivers is mandatory as of the Stage 2D staffing simplification:
+ * it is snapshotted directly from the governing Shift's required_drivers at
+ * materialisation time, and can never be null (required_drivers has been
+ * mandatory on shift_templates since Shift-creation time). isPremium is an
+ * inert legacy column -- no longer resolved or populated; high-value/
+ * fairness is not part of the V1 product model. See coverageTone/
+ * coverageLabel in components/ui/StatusPill.tsx and docs/business-rules.md.
  *
  * No basePayChf/deliveryRateChf here (removed Stage 2D Payroll Checkpoint
  * A): a shift instance never snapshots pay. Base pay and driver delivery
@@ -164,7 +171,7 @@ export interface ShiftInstanceRecord {
   sortOrder: number;
   startTime: string;
   endTime: string;
-  requiredDrivers: number | null;
+  requiredDrivers: number;
   isPremium: boolean | null;
   status: 'active' | 'cancelled';
   origin: 'template' | 'adhoc';
@@ -252,21 +259,18 @@ export interface ReopenWeekOutcome {
 // ---------------------------------------------------------------------
 
 /**
- * Maps 1:1 onto materialise_shift_instances()'s row shape. missingRotaRuleCount
- * (Stage 2D Checkpoint 3) counts shifts materialised over the requested range
- * with no applicable rota_rules_* row -- never a failure, always a "Needs
- * Attention" signal. There is no missingPayrollRuleCount: as of Stage 2D
- * Payroll Checkpoint A, materialisation has zero payroll-rate responsibility
- * -- pay is resolved later, at actual payroll-calculation time, against
- * shift_base_pay_rules/driver_delivery_rates, never here. Missing-rate
- * configuration is Payroll's own concern to surface, not shift generation's.
+ * Maps 1:1 onto materialise_shift_instances()'s row shape. There is no
+ * missing-staffing or missing-payroll count of any kind: required_drivers
+ * is mandatory at Shift-creation time (Stage 2D staffing simplification),
+ * so a materialised instance can never be missing it, and pay is resolved
+ * later, at actual payroll-calculation time, against shift_base_pay_rules/
+ * driver_delivery_rates, never here (Stage 2D Payroll Checkpoint A).
  */
 export interface MaterialiseShiftsResult {
   createdCount: number;
   skippedExistingCount: number;
   fromDate: string;
   toDate: string;
-  missingRotaRuleCount: number;
 }
 
 /** One field that would change if a template refresh were applied. */
@@ -276,11 +280,13 @@ export interface TemplateRefreshFieldChange {
 }
 
 /**
- * Maps 1:1 onto one row of preview_template_refresh(). Schedule fields only
- * as of Stage 2D Checkpoint 3 -- required_drivers/pay/is_premium are no
- * longer schedule-template concerns (they belong to payroll_rules/
- * rota_rules_*), so there is no more current/new-required-drivers or
- * over-assignment projection here at all.
+ * Maps 1:1 onto one row of preview_template_refresh(). Covers schedule
+ * fields (name/sort_order/start_time/end_time) plus required_drivers
+ * (Stage 2D staffing simplification) -- surfaced generically through
+ * `changedFields`, not a dedicated output column. Pay/is_premium are still
+ * never schedule-refresh concerns (they belong to shift_base_pay_rules/
+ * driver_delivery_rates, or are inert), so there is no over-assignment
+ * projection here.
  */
 export interface TemplateRefreshPreviewRow {
   shiftInstanceId: string;

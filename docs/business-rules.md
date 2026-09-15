@@ -9,10 +9,14 @@ An entry existing here does not imply its UI exists yet — check the
 
 ---
 
-## A. Three coverage states — "no service", "staffing not configured", "uncovered"
+## A. Coverage states — "no service" and "uncovered"/"covered"
 
-**Decided:** Stage 2D Checkpoint 1.1 (states 1 and 3); extended to three
-states in Stage 2D Checkpoint 3 once staffing moved out of Shift Setup.
+**Decided:** Stage 2D Checkpoint 1.1 (states 1 and 3); briefly extended to a
+third "staffing not configured" state in Checkpoint 3 (`rota_rules_*`), then
+**simplified back to two states** by the Stage 2D staffing simplification,
+which made `required_drivers` mandatory on the Shift itself at creation
+time — a materialised instance can never be missing it any more, so the
+"not configured" state no longer arises in normal operation.
 
 A calendar date/cell with **no active `shift_instance`** is a normal,
 expected no-service state. It must render as neutral/grey — e.g. "No
@@ -24,45 +28,31 @@ render as:
 - "0/x covered"
 - a closure warning
 
-Since Stage 2D Checkpoint 3, staffing (`required_drivers`) is resolved from
-`rota_rules_default`/`rota_rules_weekday`/`rota_rules_date` at
-materialisation time, and a shift with **no applicable rota rule at all**
-materialises with `required_drivers = NULL` — never a silently-guessed `1`.
-This is a **second, distinct non-error state**, "staffing not configured":
-a real shift exists, but nobody has said yet how many drivers it needs.
-It must render as amber/"Needs Attention" (e.g. "Staffing not configured")
-— **never** as a red "uncovered" shortfall (that would train managers to
-treat a configuration gap as if it were a shift genuinely short-staffed),
-and never as "0 drivers needed" (that would hide a real gap as if it were
-intentional).
-
-Red/uncovered styling is reserved for the narrowest case: **an active real
-shift exists, `required_drivers` is a real configured number, and assigned
-driver count < required_drivers.**
+Red/uncovered styling is reserved for: **an active real shift exists, and
+assigned driver count < required_drivers** (always a real, positive,
+mandatory number as of the staffing simplification).
 
 | Scenario | required_drivers | Rendering |
 |---|---|---|
 | No Dinner shift_instance exists Monday | n/a (no row) | Grey / neutral — "no service" |
-| Dinner exists, no rota rule was ever configured | `NULL` | Amber — "Staffing not configured" |
 | Dinner exists, required_drivers=1, assignments=0 | `1` | Red — "uncovered" |
 | Dinner exists, required_drivers=1, assignments=1 | `1` | Green — "covered" |
 
 **Why it matters:** conflating "no service" with "uncovered" makes every
 resort with a lighter schedule (or one not yet configured, like a brand-new
-resort) look like it's in a permanent coverage crisis. Conflating "staffing
-not configured" with either of the other two either hides a real
-configuration gap (as "no service") or misreports it as an urgent
-under-staffing emergency (as "uncovered") when the actual problem is
-upstream, in Rota Rules — both are misleading to a manager and would train
-them to ignore or misdiagnose real warnings.
+resort) look like it's in a permanent coverage crisis.
+
+**Legacy defensive state:** `coverageTone`/`coverageLabel` still accept
+`required: number | null` and render `null` as amber/"Staffing not
+configured" — this is a defensive fallback for any pre-simplification data
+that predates the mandatory constraint, never a normal state a manager
+should expect to see on data created since. New Shifts can never produce it.
 
 **Implemented:**
 
 - [`coverageTone`/`coverageLabel`](../src/components/ui/StatusPill.tsx) —
   pure functions that render coverage for a shift *already known to exist*.
-  `required: number | null` — `null` (Stage 2D Checkpoint 3) renders
-  amber/"Staffing not configured"; a real number renders red/amber/green as
-  before. Never called for a "no shift" cell.
+  Never called for a "no shift" cell.
 - [`ShiftCard` vs `EmptyShiftCell`](../src/components/rota/ShiftCard.tsx) —
   `WeekGrid` renders `ShiftCard` only when a real shift exists for that
   row/day, `EmptyShiftCell` (neutral, dashed border, no text) otherwise.
@@ -73,13 +63,11 @@ them to ignore or misdiagnose real warnings.
 - [`rotaReadiness`](../src/lib/rotaReadiness.ts)'s `uncoveredShifts` is
   filtered from the resort's actual generated shift instances, never
   inferred from an assumed/expected shift.
-- [`materialise_shift_instances`](../supabase/migrations/20260914160448_payroll_and_rota_rule_foundations.sql) —
-  leaves `shift_instances.required_drivers` (and `base_pay_chf`/
-  `delivery_rate_chf`/`is_premium`) `NULL` whenever no applicable rule
-  exists, and reports how many via `missing_payroll_rule_count`/
-  `missing_rota_rule_count` — never coalesces a missing rule to `0`/`1`/
-  `false`. Nullability itself is the "not configured" signal; no separate
-  status column was added.
+- [`materialise_shift_instances`](../supabase/migrations/20260916090000_simplify_shift_staffing.sql) —
+  snapshots `required_drivers` directly from the governing Shift
+  (`shift_templates`) at materialisation time. No rota-rule join, no
+  precedence, no missing-staffing count of any kind — required_drivers is
+  mandatory at Shift-creation time, so it can never be missing.
 
 Tests: [`StatusPill.test.ts`](../src/components/ui/StatusPill.test.ts),
 [`ShiftCard.test.tsx`](../src/components/rota/ShiftCard.test.tsx).
@@ -249,24 +237,28 @@ terminology or fields from Checkpoint 4 onward. The manager-facing Shift
 Setup UI must never show "shift type", "template", "template version",
 "weekday template", "stable key", or a raw weekday integer.
 
-**One shift, one time:** a Shift has exactly one start/end time across
-every weekday it's currently active on. A service that genuinely needs a
-different time on a different day is a **separate** Shift (e.g. "Weekend
-Dinner"), never a per-weekday time on one Shift. The atomic RPCs
-(`create_shift`/`revise_shift`/`reactivate_shift`) enforce this by
-construction — they take one time for the whole weekday selection, so
-there is no way to create per-weekday times through them.
+**One shift, one time, one staffing requirement:** a Shift has exactly one
+start/end time and one `required_drivers` count across every weekday it's
+currently active on. A service that genuinely needs a different time or a
+different staffing level on a different day (or season) is a **separate**
+Shift (e.g. "Weekend Dinner", or "Dinner (1P)" / "Dinner (2P)" — see
+section H), never a per-weekday time or headcount on one Shift. The atomic
+RPCs (`create_shift`/`revise_shift`/`reactivate_shift`) enforce this by
+construction — they take one time and one staffing count for the whole
+weekday selection, so there is no way to create per-weekday times or
+headcounts through them.
 
 **Legacy inconsistent data — never silently flattened:** the pre-
 Checkpoint-4 UI *did* allow different times on different weekdays of the
 same shift type (it wrote `shift_templates` rows one weekday at a time,
-each with its own time). Data like that can still exist. When the
-Checkpoint 4 UI assembles a shift type's current templates into one
-"Shift" and finds they don't actually share one time (and/or one
-effective period), it does **not** guess which row is authoritative — it
-shows a review-required notice ("This shift has different times
-configured on different days...") instead of a schedule, and disables
-the simplified Edit form for it. See
+each with its own time), and pre-staffing-simplification data can have
+different `required_drivers` values across weekdays too. Data like that can
+still exist. When the current UI assembles a shift type's current templates
+into one "Shift" and finds they don't actually share one time, one staffing
+count, and one effective period, it does **not** guess which row is
+authoritative — it shows a review-required notice ("This shift has
+different times configured on different days...") instead of a schedule,
+and disables the simplified Edit form for it. See
 [`assembleShift`](../src/repositories/assembleShift.ts) and
 [`ShiftSetupPanel`](../src/pages/manager/configuration/ShiftSetupPanel.tsx).
 Resolving such a shift today requires direct database correction
@@ -426,12 +418,11 @@ deliberately two separate manager actions, never conflated:
 pattern). `shift_instances` no longer has `base_pay_chf`/`delivery_rate_chf`
 at all (dropped, not just deprecated) and `materialise_shift_instances` has
 zero payroll-rate responsibility — no join to either rate table, no
-`missing_payroll_rule_count` (removed from its return shape entirely;
-`missing_rota_rule_count` is retained, since staffing remains a genuine
-materialisation/operational concern). `shift_templates.{base_pay_chf,
-delivery_rate_chf,required_drivers,is_premium}` remain exactly as
-deprecated/inert since Checkpoint 3 — untouched by that checkpoint, out of
-scope.
+`missing_payroll_rule_count` in any form. `shift_templates.{base_pay_chf,
+delivery_rate_chf}` remain deprecated/inert (nullable, never read). Note:
+`shift_templates.required_drivers` was deprecated/inert at the time of this
+checkpoint but was made authoritative again by the later Stage 2D staffing
+simplification (section H) — `is_premium` remains inert/never-populated.
 
 **Implemented (Stage 2D Payroll Checkpoint B — rate configuration):** the
 atomic manager RPCs `set_shift_base_pay_rate`/`set_driver_delivery_rate` —
@@ -465,3 +456,86 @@ providers. `PayrollRulesPanel`'s Edit modal surfaces "Correct current rate"/
 "Correct scheduled rate" as a clearly separate action from the "Schedule
 Change" future-change form, opening a focused confirmation dialog ("Correct
 base pay/delivery rate — `<name>`") with its own audit-oriented helper text.
+
+---
+
+## H. Shift staffing simplification and future Auto-Rota direction
+
+**Decided:** Stage 2D staffing simplification, replacing the abandoned
+manager-facing "Rota Rules" system (`rota_rules_default`/`weekday`/`date` —
+Checkpoint 3) before any UI/repository/RPC was ever built against it (only
+raw-SQL test/fixture inserts existed anywhere in this codebase).
+
+**A. Staffing lives on the Shift, not a separate rule system.**
+`shift_templates.required_drivers` is authoritative again — mandatory
+(>= 1, no default) at Shift-creation time, exactly like start/end time (see
+section F). A different staffing requirement for the same service is simply
+a **separately-named Shift**, e.g. "Dinner (1P)" (1 driver) and "Dinner
+(2P)" (2 drivers) as two independent Shifts with their own date ranges —
+**never** parsed from the name, never a precedence/override rule.
+`shift_templates_no_overlap` is scoped per shift *type* (a stable identity
+per Shift), so two differently-named Shifts may freely share identical
+times/weekdays/dates with no conflict — this is by design, not a gap; no
+duplicate/overlap warning is built for it (§B below).
+
+**B. No duplicate/overlap warning (deliberately, for now).** Two Shifts
+with genuinely identical or overlapping schedules can exist side by side —
+sometimes deliberately (the "(1P)"/"(2P)" pattern above), sometimes an
+accidental double-booking. V1 does not distinguish these or warn either
+way; add complexity here only once there's evidence managers need it.
+
+**C. `rota_rules_default`/`weekday`/`date` were dropped outright** (not
+deprecated) — no data migration was needed since nothing real depended on
+them. `missing_rota_rule_count` (and, from Payroll Checkpoint A,
+`missing_payroll_rule_count`) no longer exist in any form: a materialised
+instance can never be missing `required_drivers` any more, since it's
+mandatory at Shift-creation time. See section A for the resulting
+simplified two-state coverage model (no more "staffing not configured" as a
+normal state).
+
+**D. High-value/premium is not part of the V1 product model.**
+`shift_templates.is_premium`/`shift_instances.is_premium` remain as inert,
+nullable, never-populated legacy columns — no manager control, no driver
+exposure, no fairness dependency. Left in place rather than dropped, to
+avoid an unrelated column-removal migration.
+
+**E. Template refresh includes staffing.** `preview_template_refresh`/
+`apply_template_refresh` compare and can apply a `required_drivers` change
+on the governing Shift to already-generated future instances, through the
+same explicit preview → Apply flow as a schedule change (surfaced via the
+same generic `changed_fields` diff, labelled "Drivers required" in the UI)
+— never silently rewritten when the Shift is edited. **Critically, a
+staffing-only change never reopens already-confirmed driver availability**
+— that stays scoped to a genuine start/end time change, exactly as before
+staffing was added to the refresh comparison. A driver who said "Available"
+for a shift is still answering the same time window regardless of how many
+colleagues are also asked to work it.
+
+**F. Future Auto-Rota (design direction only — not implemented).** Will be
+built entirely from `shift_instances`/`required_drivers`/dates/driver
+resort/`availability`/`rota_assignments` — no Rota Rules, no High-value.
+Both `availability` (`available`/`unavailable`/absence=Not Submitted) and
+`rota_assignments` (`assignment_source` already anticipates `'manual'`/
+`'auto'`, multiple distinct drivers per shift already supported) were
+confirmed sufficient by inspection; no redesign is planned.
+
+Allocation runs **per resort, per Monday–Sunday week**, in two independent
+phases:
+1. **Weekend first** (Fri/Sat/Sun) — balance weekend assignment counts as
+   evenly as availability permits.
+2. **Weekday second** (Mon–Thu) — balance weekday assignment counts
+   separately; weekend and weekday fairness are never blended.
+
+Within each phase: **coverage always wins over fairness** (an open position
+is filled if anyone eligible is available, even if that makes the count
+less even); **availability is a hard constraint** (only an explicit
+"Available" answer counts — Not Submitted/Unavailable never assigned, never
+guessed); **driver-resort is a hard constraint**; ties broken
+**deterministically** (fewest assignments in the current phase, then fewest
+total assignments this week, then `drivers.created_at`, then `drivers.id` —
+never randomness, never display name). A multi-driver Shift (e.g. "Dinner
+(2P)") needs that many **distinct** drivers, each counted independently.
+**Existing manual assignments are preserved and counted** toward a driver's
+fairness total before allocation begins — Auto-Rota only fills the
+remaining open positions on a shift, never replaces or rebalances around a
+manual assignment.

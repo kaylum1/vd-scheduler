@@ -13,7 +13,7 @@ declare
 begin
   select shift_type_id into v_shift_type_id from create_shift(
     v_resort_id, 'Availability Test Shift', '17:00'::time, '21:00'::time,
-    array[0,1,2,3,4,5,6]::smallint[], '2027-03-01'::date, null
+    array[0,1,2,3,4,5,6]::smallint[], 1, '2027-03-01'::date, null
   );
   perform set_config('dbtest.avail_shift_type', v_shift_type_id::text, false);
   -- 2027-03-01 is a Monday.
@@ -131,14 +131,14 @@ begin
   -- shift_type_id, not a duplicate of the already-materialised one).
   select shift_type_id into v_extra_shift_type_id from create_shift(
     current_setting('dbtest.resort_a')::uuid, 'Availability Test Extra Shift', '12:00'::time, '13:00'::time,
-    array[2]::smallint[], '2027-03-01'::date, null
+    array[2]::smallint[], 1, '2027-03-01'::date, null
   );
   perform set_config('dbtest.avail_extra_shift_type', v_extra_shift_type_id::text, false);
 
   -- shift_added: inserting a new active instance for the same resort/week
   -- reopens the confirmation.
-  insert into shift_instances (resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, status, origin)
-  select resort_id, '2027-03-03', v_extra_shift_type_id, shift_key || '_extra', name, sort_order, start_time, end_time, 'active', 'adhoc'
+  insert into shift_instances (resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, required_drivers, status, origin)
+  select resort_id, '2027-03-03', v_extra_shift_type_id, shift_key || '_extra', name, sort_order, start_time, end_time, required_drivers, 'active', 'adhoc'
   from shift_instances where shift_type_id = current_setting('dbtest.avail_shift_type')::uuid and date = '2027-03-01';
 
   perform pg_temp.expect_true('stale confirmation: adding a new active shift reopens the week (shift_added)',

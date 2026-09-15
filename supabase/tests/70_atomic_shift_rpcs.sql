@@ -10,7 +10,7 @@ declare
 begin
   select shift_type_id into v_id from create_shift(
     v_resort_id, 'Atomic Test Shift', '09:00'::time, '13:00'::time,
-    array[0,1,2,3,4,5,6]::smallint[], '2026-06-01'::date, null
+    array[0,1,2,3,4,5,6]::smallint[], 1, '2026-06-01'::date, null
   );
   perform set_config('dbtest.atomic_shift_type', v_id::text, false);
 end $$;
@@ -22,15 +22,20 @@ select pg_temp.expect_true('create_shift(Mon..Sun) creates exactly 7 active temp
 -- Forced failure means complete rollback -- invalid weekday, empty set.
 -- ---------------------------------------------------------------------
 select pg_temp.expect_error('create_shift with an out-of-range weekday (9) fails and rolls back atomically (23514)',
-  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0,9]::smallint[], %L::date, null)',
+  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0,9]::smallint[], 1, %L::date, null)',
     current_setting('dbtest.resort_a'), 'Atomic Should Not Exist', '09:00', '13:00', '2026-06-01'),
   '23514');
 select pg_temp.expect_true('the failed create_shift left no shift_types row behind (atomic rollback confirmed)',
   not exists (select 1 from shift_types where resort_id = current_setting('dbtest.resort_a')::uuid and name = 'Atomic Should Not Exist'));
 
 select pg_temp.expect_error('create_shift with an empty weekday array is rejected (23514)',
-  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[]::smallint[], %L::date, null)',
+  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[]::smallint[], 1, %L::date, null)',
     current_setting('dbtest.resort_a'), 'Atomic Empty Weekdays', '09:00', '13:00', '2026-06-01'),
+  '23514');
+
+select pg_temp.expect_error('create_shift with required_drivers = 0 is rejected (23514)',
+  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0]::smallint[], 0, %L::date, null)',
+    current_setting('dbtest.resort_a'), 'Atomic Zero Drivers', '09:00', '13:00', '2026-06-01'),
   '23514');
 
 -- ---------------------------------------------------------------------
@@ -46,7 +51,7 @@ begin
 
   perform revise_shift(
     v_id, current_setting('dbtest.resort_a')::uuid, 'Atomic Test Shift', '10:00'::time, '14:00'::time,
-    array[0,1,2,3,4,5]::smallint[], '2026-07-01'::date, null
+    array[0,1,2,3,4,5]::smallint[], 1, '2026-07-01'::date, null
   );
 
   perform pg_temp.expect_true('revise_shift atomically drops Sunday: exactly 6 active weekdays remain',
@@ -93,7 +98,7 @@ begin
 
   perform reactivate_shift(
     v_id, current_setting('dbtest.resort_a')::uuid, '11:00'::time, '15:00'::time,
-    array[0,2,4]::smallint[], '2026-09-01'::date, null
+    array[0,2,4]::smallint[], 1, '2026-09-01'::date, null
   );
 
   perform pg_temp.expect_true('reactivate_shift marks the shift type active again under the same id',
@@ -108,7 +113,7 @@ end $$;
 
 -- reactivate_shift rejects reactivating an already-active shift.
 select pg_temp.expect_error('reactivate_shift rejects a shift that is already active (23514)',
-  format('select reactivate_shift(%L::uuid, %L::uuid, %L::time, %L::time, array[0]::smallint[], null, null)',
+  format('select reactivate_shift(%L::uuid, %L::uuid, %L::time, %L::time, array[0]::smallint[], 1, null, null)',
     current_setting('dbtest.atomic_shift_type'), current_setting('dbtest.resort_a'), '09:00', '10:00'),
   '23514');
 
@@ -126,24 +131,24 @@ select pg_temp.expect_true('deactivate_shift is audited: an update row exists fo
 
 select pg_temp.act_as('authenticated', current_setting('dbtest.driver_a_user_id')::uuid);
 select pg_temp.expect_error('create_shift rejects a driver caller (42501)',
-  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0]::smallint[], %L::date, null)',
+  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0]::smallint[], 1, %L::date, null)',
     current_setting('dbtest.resort_a'), 'Driver Should Not Create', '09:00', '10:00', '2026-06-01'),
   '42501');
 select pg_temp.expect_error('revise_shift rejects a driver caller (42501)',
-  format('select revise_shift(%L::uuid, %L::uuid, %L, %L::time, %L::time, array[0]::smallint[], null, null)',
+  format('select revise_shift(%L::uuid, %L::uuid, %L, %L::time, %L::time, array[0]::smallint[], 1, null, null)',
     current_setting('dbtest.atomic_shift_type'), current_setting('dbtest.resort_a'), 'x', '09:00', '10:00'),
   '42501');
 select pg_temp.expect_error('deactivate_shift rejects a driver caller (42501)',
   format('select deactivate_shift(%L::uuid, %L::uuid, null)', current_setting('dbtest.atomic_shift_type'), current_setting('dbtest.resort_a')),
   '42501');
 select pg_temp.expect_error('reactivate_shift rejects a driver caller (42501)',
-  format('select reactivate_shift(%L::uuid, %L::uuid, %L::time, %L::time, array[0]::smallint[], null, null)',
+  format('select reactivate_shift(%L::uuid, %L::uuid, %L::time, %L::time, array[0]::smallint[], 1, null, null)',
     current_setting('dbtest.atomic_shift_type'), current_setting('dbtest.resort_a'), '09:00', '10:00'),
   '42501');
 
 select pg_temp.act_as('anon');
 select pg_temp.expect_error('create_shift rejects an anonymous caller (42501)',
-  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0]::smallint[], %L::date, null)',
+  format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0]::smallint[], 1, %L::date, null)',
     current_setting('dbtest.resort_a'), 'Anon Should Not Create', '09:00', '10:00', '2026-06-01'),
   '42501');
 

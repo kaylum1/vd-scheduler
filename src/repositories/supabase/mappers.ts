@@ -256,7 +256,6 @@ export function mapMaterialiseShiftsResult(row: MaterialiseShiftsRow): Materiali
     skippedExistingCount: row.skipped_existing_count,
     fromDate: row.from_date,
     toDate: row.to_date,
-    missingRotaRuleCount: row.missing_rota_rule_count,
   };
 }
 

@@ -10,7 +10,7 @@ declare
 begin
   select shift_type_id into v_shift_type_id from create_shift(
     v_resort_id, 'Materialisation Test Shift', '17:00'::time, '21:00'::time,
-    array[0,1,2,3,4,5,6]::smallint[], '2027-07-05'::date, null -- 2027-07-05 is a Monday
+    array[0,1,2,3,4,5,6]::smallint[], 1, '2027-07-05'::date, null -- 2027-07-05 is a Monday
   );
   perform set_config('dbtest.mat_shift_type', v_shift_type_id::text, false);
 end $$;
@@ -55,7 +55,7 @@ begin
   -- the earlier, already-materialised dates must keep their old time.
   perform revise_shift(
     v_shift_type_id, current_setting('dbtest.resort_a')::uuid, 'Materialisation Test Shift',
-    '18:00'::time, '22:00'::time, array[0,1,2,3,4,5,6]::smallint[], '2027-07-19'::date, null
+    '18:00'::time, '22:00'::time, array[0,1,2,3,4,5,6]::smallint[], 1, '2027-07-19'::date, null
   );
   perform materialise_shift_instances(current_setting('dbtest.resort_a')::uuid, '2027-07-19'::date, '2027-07-19'::date);
 end $$;
@@ -103,8 +103,8 @@ select pg_temp.expect_true('attendance protection: an instance with recorded att
     where date = '2027-07-15' and shift_type_id = current_setting('dbtest.mat_shift_type')::uuid));
 
 -- ---------------------------------------------------------------------
--- Refresh preview/apply: schedule-only scope (Checkpoint 3), still applies
--- real schedule changes and still reopens availability on a time change.
+-- Refresh preview/apply: schedule changes, still applies real schedule
+-- changes and still reopens availability on a time change.
 -- ---------------------------------------------------------------------
 do $$
 declare
@@ -112,7 +112,7 @@ declare
 begin
   perform revise_shift(
     current_setting('dbtest.mat_shift_type')::uuid, current_setting('dbtest.resort_a')::uuid, 'Materialisation Renamed',
-    '18:00'::time, '22:00'::time, array[0,1,2,3,4,5,6]::smallint[], '2027-07-19'::date, null
+    '18:00'::time, '22:00'::time, array[0,1,2,3,4,5,6]::smallint[], 1, '2027-07-19'::date, null
   );
   perform pg_temp.expect_true('refresh preview: a name change on the governing template shows up as will_change',
     exists (select 1 from preview_template_refresh(current_setting('dbtest.resort_a')::uuid, '2027-07-19'::date)
@@ -147,25 +147,84 @@ begin
 
   perform revise_shift(
     current_setting('dbtest.mat_shift_type')::uuid, current_setting('dbtest.resort_a')::uuid, 'Materialisation Renamed',
-    '19:00'::time, '23:00'::time, array[0,1,2,3,4,5,6]::smallint[], '2027-07-19'::date, null
+    '19:00'::time, '23:00'::time, array[0,1,2,3,4,5,6]::smallint[], 1, '2027-07-19'::date, null
   );
   select * into v_apply from apply_template_refresh(current_setting('dbtest.resort_a')::uuid, '2027-07-19'::date);
   perform pg_temp.expect_true('refresh + availability: a genuine start_time change reopens the previously-confirmed week',
     v_apply.reopened_submission_count >= 1, format('got %s', v_apply.reopened_submission_count));
 end $$;
 
--- Schedule refresh does not own pay/staffing/high-value (structural,
--- reconfirmed here independent of the Checkpoint 3 suite).
-select pg_temp.expect_true('refresh scope: preview_template_refresh has no pay/staffing/high-value output columns',
+-- Schedule refresh does not own pay/high-value at all, and never tracks
+-- over-assignment (structural). Staffing (required_drivers) IS in scope --
+-- see the dedicated staffing-refresh block below -- surfaced through the
+-- same generic changed_fields jsonb as name/time, not a dedicated output
+-- column, so no new OUT parameter needed for it.
+select pg_temp.expect_true('refresh scope: preview_template_refresh has no pay/high-value/over-assignment output columns',
   not exists (
     select 1 from pg_proc where proname = 'preview_template_refresh'
-      and (proargnames && array['current_required_drivers', 'new_required_drivers', 'would_be_overassigned', 'current_base_pay_chf', 'new_base_pay_chf'])
+      and (proargnames && array['would_be_overassigned', 'current_base_pay_chf', 'new_base_pay_chf', 'current_is_premium', 'new_is_premium'])
   ));
 select pg_temp.expect_true('refresh scope: apply_template_refresh has no overassigned-tracking output columns',
   not exists (
     select 1 from pg_proc where proname = 'apply_template_refresh'
       and (proargnames && array['overassigned_count', 'overassigned_shift_instance_ids'])
   ));
+
+-- ---------------------------------------------------------------------
+-- Staffing refresh (Stage 2D staffing simplification): a required_drivers
+-- change on the governing Shift shows up in preview, changes nothing until
+-- Apply, Apply updates the eligible future instance, and -- critically --
+-- a staffing-ONLY change must never reopen already-confirmed availability
+-- (only a genuine start/end time change does, per the block above).
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_staffing_shift_type uuid;
+  v_apply record;
+  v_before_confirmed boolean;
+  v_after_confirmed boolean;
+begin
+  select shift_type_id into v_staffing_shift_type from create_shift(
+    current_setting('dbtest.resort_a')::uuid, 'Staffing Refresh Test Shift', '17:00'::time, '21:00'::time,
+    array[0]::smallint[], 1, '2027-08-02'::date, null -- 2027-08-02 is a Monday
+  );
+  perform materialise_shift_instances(current_setting('dbtest.resort_a')::uuid, '2027-08-02'::date, '2027-08-02'::date);
+
+  -- materialise_shift_instances covers every active Shift for the resort,
+  -- not just this one (the still-active, open-ended "Materialisation Test
+  -- Shift" also recurs on this Monday) -- answer for every shift_instance
+  -- in the week so confirm_availability_week actually confirms.
+  insert into availability (driver_id, resort_id, shift_instance_id, status)
+  select current_setting('dbtest.driver_a_id')::uuid, current_setting('dbtest.resort_a')::uuid, id, 'available'
+  from shift_instances where resort_id = current_setting('dbtest.resort_a')::uuid and week_start = '2027-08-02';
+  perform confirm_availability_week(current_setting('dbtest.driver_a_id')::uuid, '2027-08-02'::date);
+
+  select submitted_at is not null into v_before_confirmed
+  from availability_submissions where driver_id = current_setting('dbtest.driver_a_id')::uuid and week_start = '2027-08-02';
+  perform pg_temp.expect_true('staffing refresh: week is confirmed before the staffing change', v_before_confirmed);
+
+  perform revise_shift(
+    v_staffing_shift_type, current_setting('dbtest.resort_a')::uuid, 'Staffing Refresh Test Shift',
+    '17:00'::time, '21:00'::time, array[0]::smallint[], 2, '2027-08-02'::date, null
+  );
+
+  perform pg_temp.expect_true('staffing refresh: nothing changes on the instance before Apply',
+    (select required_drivers from shift_instances where shift_type_id = v_staffing_shift_type and date = '2027-08-02') = 1);
+  perform pg_temp.expect_true('staffing refresh: preview shows the required_drivers change (1 -> 2)',
+    exists (select 1 from preview_template_refresh(current_setting('dbtest.resort_a')::uuid, '2027-08-02'::date)
+      where shift_type_id = v_staffing_shift_type and will_change
+        and changed_fields -> 'required_drivers' = jsonb_build_object('old', 1, 'new', 2)));
+
+  select * into v_apply from apply_template_refresh(current_setting('dbtest.resort_a')::uuid, '2027-08-02'::date);
+  perform pg_temp.expect_true('staffing refresh: Apply updates the instance to the new required_drivers',
+    (select required_drivers from shift_instances where shift_type_id = v_staffing_shift_type and date = '2027-08-02') = 2);
+
+  select submitted_at is not null into v_after_confirmed
+  from availability_submissions where driver_id = current_setting('dbtest.driver_a_id')::uuid and week_start = '2027-08-02';
+  perform pg_temp.expect_true('staffing refresh: a staffing-ONLY change does NOT reopen already-confirmed availability',
+    v_after_confirmed, format('reopened_submission_count=%s', v_apply.reopened_submission_count));
+  perform pg_temp.expect_equal('staffing refresh: reopened_submission_count is 0 for a staffing-only change', v_apply.reopened_submission_count, 0);
+end $$;
 
 -- ---------------------------------------------------------------------
 -- Cancellation preview/apply: only the safe subset is ever cancelled.

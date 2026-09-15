@@ -30,7 +30,11 @@ export function generateMockShiftInstancesForWeek(resortId: string, weekStart: s
         sortOrder: shiftType?.sortOrder ?? 0,
         startTime: template.startTime,
         endTime: template.endTime,
-        requiredDrivers: template.requiredDrivers,
+        // requiredDrivers is mandatory on every row written since the Stage
+        // 2D staffing simplification -- the `?? 1` only guards legacy mock
+        // fixtures predating that (never a silently-guessed value for a
+        // template created through today's repository methods).
+        requiredDrivers: template.requiredDrivers ?? 1,
         isPremium: template.isPremium,
         status: 'active',
         origin: 'template',

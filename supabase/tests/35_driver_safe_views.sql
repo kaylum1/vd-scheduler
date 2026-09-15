@@ -13,10 +13,8 @@ declare
 begin
   select shift_type_id into v_shift_type_id from create_shift(
     v_resort_id, 'Safe View Test Shift', '17:00'::time, '21:00'::time,
-    array[0]::smallint[], '2027-06-07'::date, null -- 2027-06-07 is a Monday
+    array[0]::smallint[], 1, '2027-06-07'::date, null -- 2027-06-07 is a Monday
   );
-  insert into rota_rules_default (resort_id, shift_type_id, required_drivers, is_premium, effective_from)
-  values (v_resort_id, v_shift_type_id, 1, true, '2027-06-01');
   perform materialise_shift_instances(v_resort_id, '2027-06-07'::date, '2027-06-07'::date);
 
   select id into v_shift_instance_id from shift_instances where shift_type_id = v_shift_type_id and date = '2027-06-07';
@@ -34,7 +32,7 @@ end $$;
 -- ---------------------------------------------------------------------
 -- base_pay_chf/delivery_rate_chf are no longer even columns on
 -- shift_instances (Stage 2D Payroll Checkpoint A) -- checking for their
--- absence from this view too would be vacuous; see 60_payroll_rota_rules.sql
+-- absence from this view too would be vacuous; see 60_shift_staffing.sql
 -- for that structural proof directly.
 select pg_temp.expect_true('driver_visible_shifts: no premium/headcount/internal columns exist on the view at all',
   not exists (

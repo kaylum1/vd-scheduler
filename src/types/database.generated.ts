@@ -714,147 +714,6 @@ export type Database = {
           },
         ]
       }
-      rota_rules_date: {
-        Row: {
-          created_at: string
-          id: string
-          is_active: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          specific_date: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          specific_date: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          is_premium?: boolean
-          required_drivers?: number
-          resort_id?: string
-          shift_type_id?: string
-          specific_date?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "rota_rules_date_shift_type_resort_fk"
-            columns: ["shift_type_id", "resort_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id", "resort_id"]
-          },
-        ]
-      }
-      rota_rules_default: {
-        Row: {
-          created_at: string
-          effective_from: string
-          effective_to: string | null
-          id: string
-          is_active: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          effective_from: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          effective_from?: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          is_premium?: boolean
-          required_drivers?: number
-          resort_id?: string
-          shift_type_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "rota_rules_default_shift_type_resort_fk"
-            columns: ["shift_type_id", "resort_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id", "resort_id"]
-          },
-        ]
-      }
-      rota_rules_weekday: {
-        Row: {
-          created_at: string
-          effective_from: string
-          effective_to: string | null
-          id: string
-          is_active: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          updated_at: string
-          weekday: number
-        }
-        Insert: {
-          created_at?: string
-          effective_from: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          updated_at?: string
-          weekday: number
-        }
-        Update: {
-          created_at?: string
-          effective_from?: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          is_premium?: boolean
-          required_drivers?: number
-          resort_id?: string
-          shift_type_id?: string
-          updated_at?: string
-          weekday?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "rota_rules_weekday_shift_type_resort_fk"
-            columns: ["shift_type_id", "resort_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id", "resort_id"]
-          },
-        ]
-      }
       shift_base_pay_rules: {
         Row: {
           base_pay_chf: number
@@ -911,7 +770,7 @@ export type Database = {
           is_premium: boolean | null
           name: string
           origin: string
-          required_drivers: number | null
+          required_drivers: number
           resort_id: string
           shift_key: string
           shift_type_id: string
@@ -933,7 +792,7 @@ export type Database = {
           is_premium?: boolean | null
           name: string
           origin: string
-          required_drivers?: number | null
+          required_drivers: number
           resort_id: string
           shift_key: string
           shift_type_id: string
@@ -955,7 +814,7 @@ export type Database = {
           is_premium?: boolean | null
           name?: string
           origin?: string
-          required_drivers?: number | null
+          required_drivers?: number
           resort_id?: string
           shift_key?: string
           shift_type_id?: string
@@ -1008,7 +867,7 @@ export type Database = {
           id: string
           is_active: boolean
           is_premium: boolean | null
-          required_drivers: number | null
+          required_drivers: number
           resort_id: string
           shift_type_id: string
           start_time: string
@@ -1025,7 +884,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_premium?: boolean | null
-          required_drivers?: number | null
+          required_drivers: number
           resort_id: string
           shift_type_id: string
           start_time: string
@@ -1042,7 +901,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_premium?: boolean | null
-          required_drivers?: number | null
+          required_drivers?: number
           resort_id?: string
           shift_type_id?: string
           start_time?: string
@@ -1206,6 +1065,7 @@ export type Database = {
         Row: {
           current_end_time: string | null
           current_name: string | null
+          current_required_drivers: number | null
           current_sort_order: number | null
           current_start_time: string | null
           current_template_id: string | null
@@ -1213,6 +1073,7 @@ export type Database = {
           governing_template_id: string | null
           new_end_time: string | null
           new_name: string | null
+          new_required_drivers: number | null
           new_sort_order: number | null
           new_start_time: string | null
           resort_id: string | null
@@ -1252,6 +1113,7 @@ export type Database = {
           p_effective_from: string
           p_effective_to?: string
           p_end_time: string
+          p_required_drivers: number
           p_resort_id: string
           p_shift_type_id: string
           p_start_time: string
@@ -1331,6 +1193,7 @@ export type Database = {
           p_effective_to?: string
           p_end_time: string
           p_name: string
+          p_required_drivers: number
           p_resort_id: string
           p_start_time: string
           p_weekdays: number[]
@@ -1376,7 +1239,6 @@ export type Database = {
         Returns: {
           created_count: number
           from_date: string
-          missing_rota_rule_count: number
           skipped_existing_count: number
           to_date: string
         }[]
@@ -1427,6 +1289,7 @@ export type Database = {
           p_effective_from?: string
           p_effective_to?: string
           p_end_time: string
+          p_required_drivers: number
           p_resort_id: string
           p_shift_type_id: string
           p_start_time: string
@@ -1456,6 +1319,7 @@ export type Database = {
           p_effective_to?: string
           p_end_time: string
           p_name: string
+          p_required_drivers: number
           p_resort_id: string
           p_shift_type_id: string
           p_start_time: string

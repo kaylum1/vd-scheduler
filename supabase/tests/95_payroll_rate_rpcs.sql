@@ -17,13 +17,13 @@ declare
 begin
   select shift_type_id into v_id from create_shift(
     v_resort_id, 'Rate RPC Shift', '18:00'::time, '21:30'::time,
-    array[0]::smallint[], (current_date - 90)::date, null
+    array[0]::smallint[], 1, (current_date - 90)::date, null
   );
   perform set_config('dbtest.rpc_shift_type', v_id::text, false);
 
   select shift_type_id into v_id from create_shift(
     current_setting('dbtest.resort_b')::uuid, 'Rate RPC Shift B', '18:00'::time, '21:30'::time,
-    array[0]::smallint[], (current_date - 90)::date, null
+    array[0]::smallint[], 1, (current_date - 90)::date, null
   );
   perform set_config('dbtest.rpc_shift_type_b', v_id::text, false);
 
@@ -33,7 +33,7 @@ begin
   -- one already superseded by a later future-scheduled change).
   select shift_type_id into v_id from create_shift(
     v_resort_id, 'Rate RPC Shift Backdate', '18:00'::time, '21:30'::time,
-    array[1]::smallint[], (current_date - 90)::date, null
+    array[1]::smallint[], 1, (current_date - 90)::date, null
   );
   perform set_config('dbtest.rpc_shift_type_backdate', v_id::text, false);
 end $$;
@@ -255,7 +255,7 @@ declare
 begin
   select shift_type_id into v_shift_type from create_shift(
     current_setting('dbtest.resort_a')::uuid, 'Rate RPC Shift Today', '18:00'::time, '21:30'::time,
-    array[2]::smallint[], (current_date - 90)::date, null
+    array[2]::smallint[], 1, (current_date - 90)::date, null
   );
 
   -- Set today's rate (no p_effective_from -- defaults to today).

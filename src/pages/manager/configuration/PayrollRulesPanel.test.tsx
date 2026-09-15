@@ -135,6 +135,7 @@ describe('PayrollRulesPanel: Shift base pay', () => {
       startTime: '12:00',
       endTime: '14:00',
       weekdays: [0],
+      requiredDrivers: 1,
     });
 
     renderPanel();

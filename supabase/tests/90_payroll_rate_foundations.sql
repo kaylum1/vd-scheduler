@@ -2,7 +2,7 @@
 -- shift_base_pay_rules (Shift-level base guarantee) and
 -- driver_delivery_rates (driver-level delivery rate). Both effective-dated,
 -- manager-only, audited, and NOT read by materialise_shift_instances at all
--- any more -- see 60_payroll_rota_rules.sql for that decoupling proof. This
+-- any more -- see 60_shift_staffing.sql for that decoupling proof. This
 -- file is pure rate-configuration/resolution correctness; no payroll
 -- calculation exists yet (deliberately out of scope for this checkpoint),
 -- so "resolution" here means the plain effective-dating predicate a future
@@ -24,13 +24,13 @@ declare
 begin
   select shift_type_id into v_id from create_shift(
     current_setting('dbtest.resort_a')::uuid, 'Rate Test Shift', '18:00'::time, '21:30'::time,
-    array[0]::smallint[], '2027-01-01'::date, null
+    array[0]::smallint[], 1, '2027-01-01'::date, null
   );
   perform set_config('dbtest.rate_shift_type', v_id::text, false);
 
   select shift_type_id into v_id from create_shift(
     current_setting('dbtest.resort_b')::uuid, 'Rate Test Shift B', '18:00'::time, '21:30'::time,
-    array[0]::smallint[], '2027-01-01'::date, null
+    array[0]::smallint[], 1, '2027-01-01'::date, null
   );
   perform set_config('dbtest.rate_shift_type_b', v_id::text, false);
 end $$;

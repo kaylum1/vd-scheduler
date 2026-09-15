@@ -91,6 +91,9 @@ function validateScheduleInput(input: ShiftScheduleInput, operation: string): vo
   if (input.endTime <= input.startTime) {
     throw new RepositoryError('End time must be after start time.', { operation, code: '23514' });
   }
+  if (!input.requiredDrivers || input.requiredDrivers < 1) {
+    throw new RepositoryError('At least 1 driver is required.', { operation, code: '23514' });
+  }
 }
 
 export class MockShiftConfigurationRepository implements ShiftConfigurationRepository {
@@ -124,7 +127,7 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
         weekday,
         startTime: input.startTime,
         endTime: input.endTime,
-        requiredDrivers: null,
+        requiredDrivers: input.requiredDrivers,
         basePayChf: null,
         deliveryRateChf: null,
         isPremium: null,
@@ -178,7 +181,7 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
         weekday,
         startTime: input.startTime,
         endTime: input.endTime,
-        requiredDrivers: null,
+        requiredDrivers: input.requiredDrivers,
         basePayChf: null,
         deliveryRateChf: null,
         isPremium: null,
@@ -221,6 +224,9 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
     if (!input.weekdays || input.weekdays.length === 0) {
       throw new RepositoryError('Select at least one day of the week.', { operation: 'shiftConfiguration.reactivateShift', code: '23514' });
     }
+    if (!input.requiredDrivers || input.requiredDrivers < 1) {
+      throw new RepositoryError('At least 1 driver is required.', { operation: 'shiftConfiguration.reactivateShift', code: '23514' });
+    }
 
     shiftType.isActive = true;
     const effectiveFrom = input.effectiveFrom ?? todayIso();
@@ -235,7 +241,7 @@ export class MockShiftConfigurationRepository implements ShiftConfigurationRepos
         weekday,
         startTime: input.startTime,
         endTime: input.endTime,
-        requiredDrivers: null,
+        requiredDrivers: input.requiredDrivers,
         basePayChf: null,
         deliveryRateChf: null,
         isPremium: null,

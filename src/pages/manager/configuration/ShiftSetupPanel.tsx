@@ -22,6 +22,7 @@ const FIELD_LABELS: Record<string, string> = {
   end_time: 'End time',
   name: 'Name',
   sort_order: 'Sort order',
+  required_drivers: 'Drivers required',
 };
 
 /**
@@ -56,7 +57,7 @@ export function ShiftSetupPanel({ resortId, resortName }: { resortId: string; re
   const [editingShift, setEditingShift] = useState<ShiftRecord | null>(null);
   const [reactivatingShift, setReactivatingShift] = useState<ShiftRecord | null>(null);
   const [deactivatingShift, setDeactivatingShift] = useState<ShiftRecord | null>(null);
-  const [materialiseNotice, setMaterialiseNotice] = useState<{ text: string; hasWarning: boolean } | null>(null);
+  const [materialiseNotice, setMaterialiseNotice] = useState<{ text: string } | null>(null);
   const [showRefreshDialog, setShowRefreshDialog] = useState(false);
 
   const shiftsQuery = useQuery({
@@ -79,11 +80,7 @@ export function ShiftSetupPanel({ resortId, resortName }: { resortId: string; re
         `${result.createdCount} shift${result.createdCount === 1 ? '' : 's'} created.`,
         `${result.skippedExistingCount} already existed.`,
       ];
-      const hasWarning = result.missingRotaRuleCount > 0;
-      if (result.missingRotaRuleCount > 0) {
-        parts.push(`${result.missingRotaRuleCount} shift${result.missingRotaRuleCount === 1 ? ' has' : 's have'} no Rota Rule configured.`);
-      }
-      setMaterialiseNotice({ text: parts.join(' '), hasWarning });
+      setMaterialiseNotice({ text: parts.join(' ') });
       queryClient.invalidateQueries({ queryKey: ['config', 'shiftInstances', resortId] });
     },
   });
@@ -111,12 +108,7 @@ export function ShiftSetupPanel({ resortId, resortName }: { resortId: string; re
 
       {materialiseNotice && (
         <div style={{ padding: '12px 18px 0' }}>
-          {/* Missing Rota Rule count is an informational "Needs Attention"
-              signal, never a materialisation failure -- amber, not red, and
-              dismissible like any other success notice. Shift generation has
-              no payroll-rate awareness at all (Stage 2D Payroll Checkpoint
-              A) -- missing-rate configuration is surfaced by Payroll itself. */}
-          <InlineNotice tone={materialiseNotice.hasWarning ? 'warning' : 'success'} onDismiss={() => setMaterialiseNotice(null)}>
+          <InlineNotice tone="success" onDismiss={() => setMaterialiseNotice(null)}>
             {materialiseNotice.text}
           </InlineNotice>
         </div>
@@ -246,6 +238,9 @@ function ShiftCard({
                   <IconClock style={{ width: 11, height: 11, marginRight: 3, verticalAlign: -1 }} />
                   {toHHMM(schedule.startTime)}–{toHHMM(schedule.endTime)}
                 </span>
+                <span className="shift-setup-card__staffing">
+                  {schedule.requiredDrivers} driver{schedule.requiredDrivers === 1 ? '' : 's'} required
+                </span>
                 <WeekdayChipsDisplay weekdays={schedule.weekdays} prefix={shift.isActive ? '' : 'Previously '} />
               </div>
               <div className="config-list-item__subtitle">
@@ -320,6 +315,7 @@ function ShiftFormModal({
   const [startTime, setStartTime] = useState(existing ? toHHMM(existing.startTime) : '18:00');
   const [endTime, setEndTime] = useState(existing ? toHHMM(existing.endTime) : '21:30');
   const [selectedWeekdays, setSelectedWeekdays] = useState<Set<number>>(new Set(existing?.weekdays ?? []));
+  const [requiredDrivers, setRequiredDrivers] = useState(String(existing?.requiredDrivers ?? 1));
   const [effectiveFrom, setEffectiveFrom] = useState(today);
   // Reactivate's "existing" schedule is the shift's last-known (now closed)
   // period -- its effectiveTo is when that period ENDED (the deactivation
@@ -331,6 +327,8 @@ function ShiftFormModal({
   const [effectiveTo, setEffectiveTo] = useState(inheritEndDate ? existing?.effectiveTo ?? '' : '');
   const [touched, setTouched] = useState(false);
 
+  const requiredDriversNumber = Number(requiredDrivers);
+
   const mutation = useMutation({
     mutationFn: () => {
       const input: ShiftScheduleInput = {
@@ -338,6 +336,7 @@ function ShiftFormModal({
         startTime,
         endTime,
         weekdays: [...selectedWeekdays],
+        requiredDrivers: requiredDriversNumber,
         effectiveFrom,
         effectiveTo: continuesUntilChanged ? undefined : effectiveTo || undefined,
       };
@@ -351,9 +350,15 @@ function ShiftFormModal({
   const nameError = touched && !name.trim() ? 'Name is required.' : null;
   const weekdayError = touched && selectedWeekdays.size === 0 ? 'Select at least one day.' : null;
   const timeError = touched && endTime <= startTime ? 'End time must be after start time.' : null;
+  const requiredDriversError = touched && !(requiredDriversNumber >= 1) ? 'At least 1 driver is required.' : null;
   const endsError = touched && !continuesUntilChanged && !effectiveTo ? 'Choose an end date, or select "Continues until changed".' : null;
   const canSubmit =
-    name.trim().length > 0 && selectedWeekdays.size > 0 && endTime > startTime && effectiveFrom && (continuesUntilChanged || !!effectiveTo);
+    name.trim().length > 0 &&
+    selectedWeekdays.size > 0 &&
+    endTime > startTime &&
+    requiredDriversNumber >= 1 &&
+    effectiveFrom &&
+    (continuesUntilChanged || !!effectiveTo);
 
   const addedWeekdays = mode !== 'create' ? [...selectedWeekdays].filter((w) => !previousWeekdays.has(w)).sort((a, b) => a - b) : [];
   const removedWeekdays = mode !== 'create' ? [...previousWeekdays].filter((w) => !selectedWeekdays.has(w)).sort((a, b) => a - b) : [];
@@ -423,6 +428,22 @@ function ShiftFormModal({
             ))}
           </span>
         )}
+      </div>
+
+      <div className="form-field">
+        <label htmlFor="shift-form-required-drivers">Drivers required</label>
+        <input
+          id="shift-form-required-drivers"
+          type="number"
+          min={1}
+          step={1}
+          value={requiredDrivers}
+          onChange={(e) => setRequiredDrivers(e.target.value)}
+        />
+        {requiredDriversError && <span className="form-field__error">{requiredDriversError}</span>}
+        <span className="form-field__hint">
+          A different staffing requirement for the same service is a separate Shift, e.g. "Dinner (1P)" and "Dinner (2P)".
+        </span>
       </div>
 
       <div className="form-field">

@@ -113,9 +113,11 @@ export interface DriverRepository {
 
 /**
  * Fields for create_shift/revise_shift/reactivate_shift's manager-facing
- * schedule input -- deliberately excludes pay/required drivers/high-value/
- * key/timezone (Stage 2D Checkpoint 4: those belong elsewhere or stay
- * internal, never asked of the manager in Shift Setup).
+ * schedule input. requiredDrivers is mandatory (Stage 2D staffing
+ * simplification) -- staffing lives directly on the Shift, exactly like
+ * start/end time. Still deliberately excludes pay/high-value/key/timezone
+ * -- those belong elsewhere or stay internal, never asked of the manager in
+ * Shift Setup.
  */
 export interface ShiftScheduleInput {
   name: string;
@@ -123,6 +125,8 @@ export interface ShiftScheduleInput {
   endTime: string;
   /** Monday=0..Sunday=6. At least one required -- enforced by the RPC itself, not just client-side validation. */
   weekdays: number[];
+  /** Mandatory, >= 1 -- enforced by the RPC itself, not just client-side validation. No default; never silently coalesced. */
+  requiredDrivers: number;
   /** Defaults to "today" in the resort's own timezone (resolved server-side) when omitted. */
   effectiveFrom?: string;
   /** Open-ended ("continues until changed") when omitted. */
@@ -137,16 +141,17 @@ export interface ShiftConfigurationRepository {
    * never need `listShiftTypes`/`listShiftTemplates` directly any more.
    */
   listShifts(resortId: string): Promise<ShiftRecord[]>;
-  /** Manager-side, full-fidelity read (pay/premium/headcount included). */
+  /** Manager-side, full-fidelity read (staffing/premium included; pay is never a shift_instances field -- see docs/business-rules.md). */
   listShiftInstances(params: { resortId: string; weekStart: string }): Promise<ShiftInstanceRecord[]>;
 
   /**
    * Atomic (create_shift): one new stable shift + its whole weekday
-   * schedule in a single transaction. No pay/required-drivers/high-value
-   * inputs -- those belong to Payroll/Rota Rules, configured separately.
-   * The internal `key` is generated server-side; the manager never sees or
-   * supplies it, and a name that collides with an existing key is silently
-   * disambiguated, never rejected.
+   * schedule + required staffing count, in a single transaction. No pay/
+   * high-value inputs -- pay belongs to Payroll, configured separately;
+   * high-value is not part of the V1 product model. The internal `key` is
+   * generated server-side; the manager never sees or supplies it, and a
+   * name that collides with an existing key is silently disambiguated,
+   * never rejected.
    */
   createShift(resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }>;
   /**
@@ -179,9 +184,9 @@ export interface ShiftConfigurationRepository {
   // wrappers only — the database functions remain authoritative; nothing
   // here reimplements their logic.
 
-  /** Insert-only: creates missing shift_instances from active templates. Default horizon: today through end of next month. Result includes missing-payroll/rota-rule counts (Stage 2D Checkpoint 3) -- informational, never a failure. */
+  /** Insert-only: creates missing shift_instances from active templates. Default horizon: today through end of next month. required_drivers is snapshotted directly from the governing Shift -- never missing/guessed (Stage 2D staffing simplification). */
   materialiseShifts(resortId: string, fromDate?: string, toDate?: string): Promise<MaterialiseShiftsResult>;
-  /** Read-only: what apply_template_refresh would change for the currently-safe (v_refreshable_instances) set. Schedule fields only (name/sort_order/start_time/end_time) since Stage 2D Checkpoint 3 -- pay/staffing/high-value are no longer schedule-refresh concerns. */
+  /** Read-only: what apply_template_refresh would change for the currently-safe (v_refreshable_instances) set. Schedule fields (name/sort_order/start_time/end_time) plus required_drivers (Stage 2D staffing simplification) -- pay/high-value are still never schedule-refresh concerns. */
   previewTemplateRefresh(resortId: string, fromDate?: string): Promise<TemplateRefreshPreviewRow[]>;
   /** Updates exactly the previewed safe set from their current governing template. Never removes assignments. */
   applyTemplateRefresh(resortId: string, fromDate?: string): Promise<ApplyTemplateRefreshResult>;

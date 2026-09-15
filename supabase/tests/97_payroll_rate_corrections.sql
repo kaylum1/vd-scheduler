@@ -12,7 +12,7 @@ declare
 begin
   select shift_type_id into v_id from create_shift(
     current_setting('dbtest.resort_a')::uuid, 'Correction RPC Shift', '18:00'::time, '21:30'::time,
-    array[3]::smallint[], (current_date - 90)::date, null
+    array[3]::smallint[], 1, (current_date - 90)::date, null
   );
   perform set_config('dbtest.corr_shift_type', v_id::text, false);
 end $$;
@@ -128,7 +128,7 @@ declare
 begin
   select shift_type_id into v_id from create_shift(
     current_setting('dbtest.resort_a')::uuid, 'Correction Regression Shift', '18:00'::time, '21:30'::time,
-    array[4]::smallint[], (current_date - 90)::date, null
+    array[4]::smallint[], 1, (current_date - 90)::date, null
   );
   perform set_shift_base_pay_rate(current_setting('dbtest.resort_a')::uuid, v_id, 20.00, (current_date - 30)::date);
   perform set_shift_base_pay_rate(current_setting('dbtest.resort_a')::uuid, v_id, 25.00, (current_date + 10)::date);

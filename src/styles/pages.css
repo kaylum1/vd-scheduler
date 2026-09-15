@@ -798,6 +798,12 @@
   margin-top: 2px;
 }
 
+.shift-setup-card__staffing {
+  color: var(--text-secondary);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
 @media (max-width: 640px) {
   .shift-setup-card {
     flex-wrap: wrap;
