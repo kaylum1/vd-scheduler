@@ -131,6 +131,51 @@ export function nextMockAvailabilityId(): string {
   return `mock-availability-${mockAvailabilitySeq}`;
 }
 
+/**
+ * Stage 3: mirrors availability_submissions -- mutated by
+ * confirmAvailabilityWeek()/reopenAvailabilityWeek(). At most one row per
+ * (driverId, weekStart), matching the real table's unique constraint.
+ * `reopenedReason` is 'driver_reopened' when the driver themselves clicked
+ * Reopen, or one of 'shift_added'/'shift_reinstated'/'shift_time_changed'
+ * to simulate the DB's automatic stale-invalidation trigger for a test --
+ * mock mode has no real trigger (shift instances are generated on the fly
+ * from templates, never persisted), so a test that needs to exercise the
+ * "needs reconfirmation" UI state sets this directly, the same way other
+ * mock tests push directly into `mockShiftTemplates` to fabricate a
+ * specific data state.
+ */
+export interface MockAvailabilitySubmission {
+  id: string;
+  driverId: string;
+  resortId: string;
+  weekStart: string;
+  submittedAt: string | null;
+  reopenedAt: string | null;
+  reopenedReason: string | null;
+}
+export const mockAvailabilitySubmissions: MockAvailabilitySubmission[] = [];
+
+let mockAvailabilitySubmissionSeq = 0;
+export function nextMockAvailabilitySubmissionId(): string {
+  mockAvailabilitySubmissionSeq += 1;
+  return `mock-availability-submission-${mockAvailabilitySubmissionSeq}`;
+}
+
+/**
+ * Stage 3: mirrors rota_publications -- empty by default (mock mode has no
+ * live manager Publish action yet, matching the real product's own
+ * checkpoint sequencing). Tests that need to exercise the driver-facing
+ * "published/locked" state push a row directly, the same idiom as
+ * mockAvailabilitySubmissions above.
+ */
+export interface MockRotaPublication {
+  resortId: string;
+  weekStart: string;
+  publishedAt: string | null;
+  unpublishedAt: string | null;
+}
+export const mockRotaPublications: MockRotaPublication[] = [];
+
 let mockDriverSeq = 0;
 export function nextMockDriverId(): string {
   mockDriverSeq += 1;
@@ -205,4 +250,6 @@ export function resetMockFixturesForTesting(): void {
   mockDriverDeliveryRates.length = 0;
   mockDriverDeliveryRates.push(...BASELINE_DRIVER_DELIVERY_RATES.map((r) => ({ ...r })));
   mockAvailability.length = 0;
+  mockAvailabilitySubmissions.length = 0;
+  mockRotaPublications.length = 0;
 }

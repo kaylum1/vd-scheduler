@@ -17,6 +17,15 @@ export function generateMockShiftInstancesForWeek(resortId: string, weekStart: s
   for (let weekday = 0; weekday <= 6; weekday += 1) {
     const date = toISODate(addDays(weekStartDate, weekday));
     for (const template of templates) {
+      // Mirrors materialise_shift_instances' own governing-template
+      // predicate: this weekday's row only, and only within its effective
+      // period -- a template must never appear on a day it doesn't
+      // actually run (Stage 3: driver Availability depends on this being
+      // accurate, not just "some shift exists somewhere this week").
+      if (template.weekday !== weekday) continue;
+      if (template.effectiveFrom > date) continue;
+      if (template.effectiveTo !== null && template.effectiveTo < date) continue;
+
       const shiftType = mockShiftTypes.find((t) => t.id === template.shiftTypeId);
       instances.push({
         id: `${template.id}-${date}`,

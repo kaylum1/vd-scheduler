@@ -253,6 +253,67 @@ export interface ReopenWeekOutcome {
   reopenedReason: string | null;
 }
 
+/**
+ * Stage 3: a direct, read-only projection of the driver's own
+ * availability_submissions row for one week (or null if no row exists yet
+ * -- the driver has never confirmed this week). Distinct from
+ * WeekAvailabilityStatus: that RPC always recomputes pure answer
+ * *completeness* fresh from the current active shift set and never trusts
+ * this table, whereas the driver-facing UI also needs the actual
+ * confirmation state itself (has the driver clicked "Confirm", and if a
+ * confirmation was reopened, was it the driver's own choice or an
+ * automatic stale-invalidation?) -- that state lives only here.
+ * `reopenedReason` is one of 'driver_reopened' (the driver chose to edit
+ * a confirmed week) or 'shift_added'/'shift_reinstated'/'shift_time_changed'
+ * (an automatic, service-driven staleness event -- see
+ * docs/business-rules.md). A row with `submittedAt` non-null is currently
+ * confirmed and valid -- the DB trigger that would make it stale already
+ * cleared `submittedAt` the moment a staleness-triggering change happened,
+ * so this field is never read as "confirmed as of some past moment risk of
+ * being outdated".
+ */
+export interface AvailabilitySubmissionRecord {
+  driverId: string;
+  resortId: string;
+  weekStart: string;
+  submittedAt: string | null;
+  reopenedAt: string | null;
+  reopenedReason: string | null;
+}
+
+/**
+ * Manager-facing weekly submission state for one driver (Stage 3). Derived
+ * client-side from the same primitives the driver-facing page uses
+ * (answered/total shift counts, the driver's own availability_submissions
+ * row, and the resort/week's publication state) -- never a separately
+ * stored status column. See docs/business-rules.md for the exact mapping.
+ */
+export type DriverWeekAvailabilityState = 'not_started' | 'in_progress' | 'confirmed' | 'needs_reconfirmation' | 'locked';
+
+/** One row per active driver at a resort, for one week -- what the manager's availability list renders. */
+export interface AvailabilitySubmissionSummary {
+  driverId: string;
+  driverFullName: string;
+  totalShifts: number;
+  answeredCount: number;
+  state: DriverWeekAvailabilityState;
+}
+
+/**
+ * One driver's answer (or lack of one) for one active shift_instance that
+ * week -- manager-only (drivers use `listAvailability` instead, scoped to
+ * their own session). `status: null` means the driver has not answered
+ * that shift yet ("Not Submitted") -- never a stored third status.
+ */
+export interface DriverShiftAvailability {
+  shiftInstanceId: string;
+  date: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  status: AvailabilityStatus | null;
+}
+
 // ---------------------------------------------------------------------
 // Stage 2C: shift materialisation + template refresh/cancellation.
 // Manager-only. Maps 1:1 onto the corresponding RPC row shapes.

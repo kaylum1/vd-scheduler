@@ -24,11 +24,14 @@ import type {
   ApplyTemplateCancellationResult,
   ApplyTemplateRefreshResult,
   AvailabilityAnswer,
+  AvailabilitySubmissionRecord,
+  AvailabilitySubmissionSummary,
   AvailabilityStatus,
   ConfirmWeekOutcome,
   DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
   DriverRecord,
+  DriverShiftAvailability,
   DriverVisibleAssignment,
   DriverVisibleShift,
   MaterialiseShiftsResult,
@@ -197,7 +200,15 @@ export interface ShiftConfigurationRepository {
 }
 
 export interface AvailabilityRepository {
-  /** Driver-safe shift list for answering availability against. */
+  /**
+   * Driver-safe shift list for answering availability against -- every
+   * active shift_instance in the calling driver's own resort, unbounded by
+   * week (the caller groups/filters by week client-side, exactly the way
+   * the manager-facing `listShiftInstances` is fetched per-week instead:
+   * a driver's Availability page needs to browse several weeks back/
+   * forward without a request per navigation click). Never includes
+   * required_drivers/is_premium/pay -- see driver_visible_shifts.
+   */
   listDriverVisibleShifts(resortId: string): Promise<DriverVisibleShift[]>;
   listAvailability(params: { driverId: string; resortId: string; weekStart: string }): Promise<AvailabilityAnswer[]>;
   setAvailability(params: {
@@ -212,6 +223,31 @@ export interface AvailabilityRepository {
   getWeekAvailabilityStatus(driverId: string, weekStart: string): Promise<WeekAvailabilityStatus>;
   confirmAvailabilityWeek(driverId: string, weekStart: string): Promise<ConfirmWeekOutcome>;
   reopenAvailabilityWeek(driverId: string, weekStart: string): Promise<ReopenWeekOutcome>;
+
+  /**
+   * Stage 3: a direct, read-only fetch of the driver's own
+   * availability_submissions row (or null if none exists yet). Distinct
+   * from `getWeekAvailabilityStatus` -- that RPC reports pure answer
+   * *completeness*, recomputed fresh and never trusting this table; the
+   * driver-facing UI additionally needs the actual confirmation/staleness
+   * state itself (has the driver clicked Confirm; if reopened, was that
+   * the driver's own choice or an automatic service-change invalidation),
+   * which only this row carries. Backed by the existing
+   * `availability_submissions_driver_select_own` RLS policy -- no new RPC.
+   */
+  getAvailabilitySubmission(driverId: string, weekStart: string): Promise<AvailabilitySubmissionRecord | null>;
+
+  // ---------------------------------------------------------------------
+  // Manager-only (Stage 3): visibility into driver submission state, never
+  // assignment. Both are plain authorized reads over tables the manager
+  // role already has full SELECT on (`is_active_manager()` policies) --
+  // no new RPC or migration needed for either.
+  // ---------------------------------------------------------------------
+
+  /** One row per active driver at the resort for the given week: answered/total counts + the derived submission state (see DriverWeekAvailabilityState). */
+  listAvailabilitySubmissionStatus(resortId: string, weekStart: string): Promise<AvailabilitySubmissionSummary[]>;
+  /** One driver's own answer (or none) for every active shift_instance at their resort that week -- the manager's per-driver detail view. */
+  getResortWeekAvailability(driverId: string, weekStart: string): Promise<DriverShiftAvailability[]>;
 }
 
 export interface RotaRepository {

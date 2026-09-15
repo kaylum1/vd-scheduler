@@ -3,6 +3,7 @@ import {
   mapApplyTemplateCancellationResult,
   mapApplyTemplateRefreshResult,
   mapAvailability,
+  mapAvailabilitySubmission,
   mapConfirmWeekOutcome,
   mapCreateShiftResult,
   mapDriver,
@@ -205,6 +206,31 @@ describe('mapAvailability', () => {
       shiftInstanceId: 's1',
       status: 'available',
       answeredAt: '2024-01-01T00:00:00Z',
+    });
+  });
+});
+
+describe('mapAvailabilitySubmission', () => {
+  it('maps an availability_submissions row, including a not-yet-confirmed (submitted_at null) row', () => {
+    const mapped = mapAvailabilitySubmission({
+      id: 'sub1',
+      driver_id: 'd1',
+      resort_id: 'r1',
+      week_start: '2027-01-04',
+      submitted_at: null,
+      reopened_at: '2027-01-05T00:00:00Z',
+      reopened_reason: 'shift_time_changed',
+      shift_count_at_submission: 3,
+      created_at: '',
+      updated_at: '',
+    });
+    expect(mapped).toEqual({
+      driverId: 'd1',
+      resortId: 'r1',
+      weekStart: '2027-01-04',
+      submittedAt: null,
+      reopenedAt: '2027-01-05T00:00:00Z',
+      reopenedReason: 'shift_time_changed',
     });
   });
 });

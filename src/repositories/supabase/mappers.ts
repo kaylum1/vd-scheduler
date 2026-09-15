@@ -9,6 +9,7 @@ import type {
   ApplyTemplateCancellationResult,
   ApplyTemplateRefreshResult,
   AvailabilityAnswer,
+  AvailabilitySubmissionRecord,
   ConfirmWeekOutcome,
   DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
@@ -41,6 +42,7 @@ type ShiftTypeRow = Database['public']['Tables']['shift_types']['Row'];
 type ShiftTemplateRow = Database['public']['Tables']['shift_templates']['Row'];
 type ShiftInstanceRow = Database['public']['Tables']['shift_instances']['Row'];
 type AvailabilityRow = Database['public']['Tables']['availability']['Row'];
+type AvailabilitySubmissionRow = Database['public']['Tables']['availability_submissions']['Row'];
 type DriverVisibleShiftRow = Database['public']['Views']['driver_visible_shifts']['Row'];
 type DriverVisibleAssignmentRow = Database['public']['Views']['driver_visible_assignments']['Row'];
 type WeekAvailabilityStatusRow = Database['public']['Functions']['week_availability_status']['Returns'][number];
@@ -213,6 +215,17 @@ export function mapAvailability(row: AvailabilityRow): AvailabilityAnswer {
     shiftInstanceId: row.shift_instance_id,
     status: row.status as AvailabilityAnswer['status'],
     answeredAt: row.answered_at,
+  };
+}
+
+export function mapAvailabilitySubmission(row: AvailabilitySubmissionRow): AvailabilitySubmissionRecord {
+  return {
+    driverId: row.driver_id,
+    resortId: row.resort_id,
+    weekStart: row.week_start,
+    submittedAt: row.submitted_at,
+    reopenedAt: row.reopened_at,
+    reopenedReason: row.reopened_reason,
   };
 }
 

@@ -539,3 +539,131 @@ never randomness, never display name). A multi-driver Shift (e.g. "Dinner
 fairness total before allocation begins — Auto-Rota only fills the
 remaining open positions on a shift, never replaces or rebalances around a
 manual assignment.
+
+---
+
+## I. Driver Availability
+
+**Decided/Implemented:** Stage 3. Makes the availability architecture that
+already existed at the schema/RPC level (`availability`,
+`availability_submissions`, `week_availability_status`,
+`confirm_availability_week`, `reopen_availability_week`, the stale-
+invalidation trigger — all built in earlier checkpoints) real end to end:
+a live driver-facing page and manager-facing visibility, both through the
+repository layer. No Auto-Rota, no manual assignment, no attendance, no
+Onfleet, no payroll calculation.
+
+**A. One answer per (driver, shift_instance).** `availability.status` is
+`'available'` or `'unavailable'` — a database CHECK constraint, only ever
+those two values. **No row = Not Submitted.** This is never a third stored
+status; the driver UI renders "Not answered" for it, purely a display
+choice over an absent row.
+
+**B. A week must be fully answered before it can be confirmed.**
+`confirm_availability_week` recomputes completeness fresh from the
+driver's resort's currently-active `shift_instances` every time (never
+trusts `availability_submissions.submitted_at`) — if any currently-
+scheduled shift lacks an answer, confirmation is refused
+(`result = 'incomplete'`), never silently treated as "unavailable".
+
+**C. A confirmed week may be reopened before publication.** Reopening
+clears `submitted_at` and stamps `reopened_at`/`reopened_reason =
+'driver_reopened'` — it never deletes or resets the driver's actual
+answers, which remain exactly as they were.
+
+**D. Publication locks driver changes -- enforced at the database, not the
+UI.** Once a resort/week is published (`rota_publications`), RLS itself
+(not just a disabled button) rejects a driver's INSERT/UPDATE/DELETE on
+`availability` for that week's shifts
+(`availability_driver_*_own_unpublished` policies, gated by
+`shift_instance_week_is_published()`), and both
+`confirm_availability_week`/`reopen_availability_week` return
+`result = 'locked'` without writing anything. A driver may still always
+**read** their own past answers, published or not.
+
+**E. Confirmation staleness — the exact same distinction staffing already
+required elsewhere in this document (see §H).** A confirmed submission
+becomes stale (`submitted_at` cleared, `reopened_reason` set to a specific
+cause) when, and **only** when:
+- a new active shift is added to that resort/week (`shift_added`),
+- a cancelled shift is reinstated (`shift_reinstated`), or
+- an active shift's `start_time`/`end_time` changes (`shift_time_changed`).
+
+It does **not** become stale for `required_drivers` changes, `is_premium`
+(inert), or any payroll/rate change (base pay, driver delivery rate) — none
+of those change what the driver actually agreed to work. This is enforced
+by `shift_instances_reopen_stale_confirmations()` (a trigger on
+`shift_instances`, not application code), and was already correct/tested
+before this checkpoint — Stage 3 adds a driver-facing "Needs
+reconfirmation" state that reads it, not new invalidation logic.
+
+**F. Zero-shift weeks never demand a submission.** A resort/week with no
+active shifts reports `state = 'no_shifts'` and the driver page shows a
+plain empty state — never a fabricated row, never a blocked/confused
+Confirm action. (The underlying RPC does not specifically forbid
+confirming a trivially-complete 0-of-0 week if called directly — existing,
+pre-Stage-3 behaviour, left unchanged — but the UI never offers that
+action for an empty week in the first place.)
+
+**G. Drivers only ever see their own resort's schedule, own answers.**
+`driver_visible_shifts` (a driver-safe view, Checkpoint 4) never exposes
+`required_drivers`/`is_premium`/pay/`template_id`/`origin` — a driver
+answering "can I work this?" needs only name/date/start/end time, nothing
+about how many colleagues are also needed. `availability`'s own RLS
+(`availability_driver_select_own`) means a driver can never read another
+driver's answers, confirmed or not, at the base-table level (not just
+"filtered to zero rows via a view" — there is no other path at all for a
+driver session).
+
+**H. Manager visibility is read-only in this checkpoint.** The manager
+sees, per driver at a chosen resort/week: `Not started` / `In progress` /
+`Confirmed` / `Needs reconfirmation` / `Locked`, and can drill into one
+driver's actual per-shift answers. This is composed from plain authorized
+reads (the manager role already has full SELECT on `drivers`/
+`shift_instances`/`availability`/`availability_submissions`/
+`rota_publications`) — no new RPC or migration. **No assignment, Auto-
+Rota, or Publish control exists in this manager view** — those remain
+future checkpoints; the pre-existing Stage 1.1 mock Rota grid is kept
+separate and clearly labelled as a preview, never blended with this live
+panel.
+
+**I. Future Auto-Rota's eligibility input (design constraint, not built).**
+Auto-Rota (§H above) must be able to query, per shift_instance: which
+drivers at that resort have `status = 'available'` — excluding both
+`status = 'unavailable'` and "no row at all" identically (neither is ever
+eligible). The repository/domain shapes built in this checkpoint
+(`AvailabilityAnswer`, `DriverVisibleShift`) already support this query
+shape directly; nothing further is needed to prepare for it.
+
+**Implemented:** `AvailabilityRepository` (driver: `listDriverVisibleShifts`,
+`listAvailability`, `setAvailability`, `getWeekAvailabilityStatus`,
+`confirmAvailabilityWeek`, `reopenAvailabilityWeek`,
+`getAvailabilitySubmission`; manager: `listAvailabilitySubmissionStatus`,
+`getResortWeekAvailability`), implemented for both providers.
+`pages/driver/Availability.tsx` (live, replacing the Stage 1.1 mock
+version entirely) and `components/availability/ManagerAvailabilityPanel.tsx`
+(new, mounted inside `pages/manager/RotaAvailability.tsx` above the
+still-mock Rota preview).
+
+**Known mock-mode limitation:** the mock provider has no persisted
+`shift_instances` (they're generated fresh from templates on every read),
+so it cannot simulate the DB's automatic stale-invalidation trigger. Tests
+exercising a stale/needs-reconfirmation state fabricate the resulting
+`availability_submissions` row directly (see
+`repositories/mock/fixtures.ts`'s `mockAvailabilitySubmissions` doc
+comment) — the trigger itself is a database concern, tested at that layer
+(`supabase/tests/10_availability_publication.sql`), not re-implemented in
+the mock provider.
+
+**Known pre-existing inconsistency, bridged (not removed) by this
+checkpoint:** the Stage 1.1 driver switcher (`mock-data/drivers.ts`, ids
+like `"gianni"`) and the repository-layer mock fixtures
+(`repositories/mock/fixtures.ts`, ids like `"mock-gianni"`) are two
+separate datasets kept in sync only by sharing driver/resort **names**.
+`AuthContext`'s mock-mode `currentUser.driverId`/`resortId` stay in the
+Stage 1.1 id space (Stage 1.1's own `MyRota.tsx` still depends on that).
+The live Availability page instead resolves its own id-space bridge via
+`repositories/mock/identityBridge.ts`, scoped to that one page — see its
+doc comment for why the translation couldn't live in `AuthContext` itself
+without breaking `MyRota.tsx`. Supabase mode is entirely unaffected (real
+`driver_id`/`resort_id` throughout, from `resolveCurrentUser()`).

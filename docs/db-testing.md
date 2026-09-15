@@ -63,7 +63,7 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | File | Covers |
 |---|---|
 | `00_core_schema.sql` | Weekday convention, resort/driver/app_user identity rules, cross-resort composite FKs, stable shift identity, immutability/overlap guards |
-| `10_availability_publication.sql` | Availability answers, Confirm/Reopen Week, stale-confirmation invalidation, publication locking, `week_availability_status` authority |
+| `10_availability_publication.sql` | Availability answers, Confirm/Reopen Week, stale-confirmation invalidation, publication locking, `week_availability_status` authority, direct-table identity/uniqueness/manager-visibility invariants (Stage 3) |
 | `20_assignments_attendance_adjustments.sql` | Rota assignments, attendance, payroll adjustments (types, positivity, voiding) |
 | `30_security_rls_audit.sql` | Anonymous/driver/manager RLS boundaries, RPC caller authorization, audit logging |
 | `35_driver_safe_views.sql` | `driver_visible_shifts` / `driver_visible_assignments` — the driver-facing security boundary views |
@@ -76,10 +76,10 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
 | `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of the Stage 2D staffing simplification this suite has **309
-assertions**. That number will keep changing as the suite grows — don't
-chase a specific count; the point is that it stays genuinely comprehensive
-and, unlike its scratchpad predecessor, that it survives.
+As of Stage 3 (Driver Availability) this suite has **315 assertions**. That
+number will keep changing as the suite grows — don't chase a specific
+count; the point is that it stays genuinely comprehensive and, unlike its
+scratchpad predecessor, that it survives.
 
 ## Adding a new group
 
