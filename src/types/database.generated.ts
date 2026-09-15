@@ -1438,6 +1438,21 @@ export type Database = {
           shift_type_id: string
         }[]
       }
+      set_driver_delivery_rate: {
+        Args: {
+          p_driver_id: string
+          p_effective_from?: string
+          p_rate_chf: number
+        }
+        Returns: {
+          driver_id: string
+          effective_from: string
+          effective_to: string
+          rate_chf: number
+          resort_id: string
+          rule_id: string
+        }[]
+      }
       set_driver_onfleet_mapping: {
         Args: { p_driver_id: string; p_onfleet_worker_id: string }
         Returns: {
@@ -1455,6 +1470,22 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_shift_base_pay_rate: {
+        Args: {
+          p_base_pay_chf: number
+          p_effective_from?: string
+          p_resort_id: string
+          p_shift_type_id: string
+        }
+        Returns: {
+          base_pay_chf: number
+          effective_from: string
+          effective_to: string
+          resort_id: string
+          rule_id: string
+          shift_type_id: string
+        }[]
       }
       shift_instance_week_is_published: {
         Args: { p_shift_instance_id: string }

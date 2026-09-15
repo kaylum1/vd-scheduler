@@ -254,14 +254,17 @@ function ShiftCard({
                   : `Previously ${weekdaysLabel(schedule.weekdays)} · Ended ${schedule.effectiveTo ? formatIsoDateLong(schedule.effectiveTo) : formatIsoDateLong(schedule.effectiveFrom)}`}
               </div>
             </>
-          ) : (
+          ) : shift.inconsistentWeekdays ? (
             <InlineNotice tone="error">
               This shift has different times configured on different days. Review required before it can use the simplified
-              editor.
-              {shift.inconsistentWeekdays && (
-                <> Affected days: {shift.inconsistentWeekdays.map((w) => WEEKDAYS[w]?.label ?? '?').join(', ')}.</>
-              )}
+              editor. Affected days: {shift.inconsistentWeekdays.map((w) => WEEKDAYS[w]?.label ?? '?').join(', ')}.
             </InlineNotice>
+          ) : (
+            // No schedule rows at all yet -- a genuinely different, non-error
+            // state from "inconsistent" (see assembleShift.ts's currentTemplates()):
+            // nothing to review, just nothing configured yet. Never claim
+            // conflicting times for a shift that simply has no schedule.
+            <InlineNotice tone="warning">No recurring schedule configured yet.</InlineNotice>
           )}
         </div>
       </div>
@@ -277,8 +280,8 @@ function ShiftCard({
               icon
               aria-label={`Edit ${shift.name}`}
               onClick={onEdit}
-              disabled={!schedule}
-              title={schedule ? undefined : 'Review required before this shift can be edited here'}
+              disabled={!schedule && !!shift.inconsistentWeekdays}
+              title={!schedule && shift.inconsistentWeekdays ? 'Review required before this shift can be edited here' : undefined}
             >
               <IconEdit />
             </Button>

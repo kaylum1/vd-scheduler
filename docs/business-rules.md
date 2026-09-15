@@ -273,6 +273,18 @@ Resolving such a shift today requires direct database correction
 (deliberately out of scope for the simplified UI); a future checkpoint may
 add an in-UI resolution flow.
 
+**Zero templates is a different, non-error state (fixed Stage 2D Payroll
+Checkpoint B):** a shift type with **no** `shift_templates` rows at all
+(e.g. one created directly, outside the atomic RPCs, before any schedule
+was ever set) also gets `schedule: null` from `assembleShift`, but `
+inconsistentWeekdays` is left empty for this case specifically — it is
+"nothing configured yet", not "conflicting data". `ShiftSetupPanel` renders
+this as a neutral "No recurring schedule configured yet." notice (never the
+inconsistent-times wording) and leaves Edit enabled, since there is nothing
+to silently flatten — a manager can configure the schedule fresh through the
+normal Edit form. Only a genuinely inconsistent shift (`inconsistentWeekdays`
+populated) still disables Edit and shows the review-required notice above.
+
 **"Last known schedule" for an inactive Shift** (shown on its Inactive
 card, and pre-filled as Reactivate's starting point) is reconstructed from
 whichever `shift_templates` rows share the *latest* `updated_at` for that
@@ -374,13 +386,33 @@ run they belong to is only "Finalised" once every required line is.
 **Implemented (Stage 2D Payroll Checkpoint A):** `shift_base_pay_rules`
 (renamed from `payroll_rules`, `delivery_rate_chf` removed), `driver_delivery_rates`
 (new, mirrors the same effective-dated/no-overlap/manager-only/audited
-pattern), both resolved by nothing yet — no Payroll Rules UI, no repository
-writer, and no payroll calculation exist yet (Checkpoints B/E). `shift_instances`
-no longer has `base_pay_chf`/`delivery_rate_chf` at all (dropped, not just
-deprecated) and `materialise_shift_instances` has zero payroll-rate
-responsibility — no join to either rate table, no `missing_payroll_rule_count`
-(removed from its return shape entirely; `missing_rota_rule_count` is
-retained, since staffing remains a genuine materialisation/operational
-concern). `shift_templates.{base_pay_chf,delivery_rate_chf,required_drivers,
-is_premium}` remain exactly as deprecated/inert since Checkpoint 3 — untouched
-by this checkpoint, out of scope.
+pattern). `shift_instances` no longer has `base_pay_chf`/`delivery_rate_chf`
+at all (dropped, not just deprecated) and `materialise_shift_instances` has
+zero payroll-rate responsibility — no join to either rate table, no
+`missing_payroll_rule_count` (removed from its return shape entirely;
+`missing_rota_rule_count` is retained, since staffing remains a genuine
+materialisation/operational concern). `shift_templates.{base_pay_chf,
+delivery_rate_chf,required_drivers,is_premium}` remain exactly as
+deprecated/inert since Checkpoint 3 — untouched by that checkpoint, out of
+scope.
+
+**Implemented (Stage 2D Payroll Checkpoint B — rate configuration):** the
+atomic manager RPCs `set_shift_base_pay_rate`/`set_driver_delivery_rate` —
+create-or-schedule a rate in one transaction, never overwriting an
+already-real historical/in-effect period's own values (a genuine future
+change closes the current open-ended row and inserts a fresh one; a
+not-yet-started future plan is corrected in place instead); reject a
+backdate attempt on/before an already-in-effect rule's own start (23514),
+and reject any other overlap via the tables' own exclusion constraints
+(23P01). `PayrollRulesRepository` (`listShiftBasePayRules`/
+`setShiftBasePayRate`/`listDriverDeliveryRates`/`setDriverDeliveryRate`),
+implemented for both providers. `Configuration → Payroll Rules`
+(`PayrollRulesPanel`) — the real manager-facing page: the same "Choose
+resort" selector pattern as Resort & Shift Setup, two clearly separated
+sections (Shift base pay / Driver delivery rates), Current/Scheduled/History
+categorised client-side from the flat rate list (`categorizeRatePeriods`,
+the one place this resolution logic lives), "Not configured" shown as an
+amber "Needs setup" state rather than a fabricated CHF 0, and a compact
+formula explanation. No attendance/Onfleet/double-pay/payroll-calculation
+controls anywhere on this page — those remain future Dashboard/Payroll
+checkpoints' responsibility.

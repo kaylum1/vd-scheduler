@@ -10,19 +10,28 @@
 
 import { getDataProvider, type DataProvider } from '../lib/env';
 import { getSupabaseClient } from '../lib/supabase/client';
-import type { AvailabilityRepository, DriverRepository, ResortRepository, RotaRepository, ShiftConfigurationRepository } from './types';
+import type {
+  AvailabilityRepository,
+  DriverRepository,
+  PayrollRulesRepository,
+  ResortRepository,
+  RotaRepository,
+  ShiftConfigurationRepository,
+} from './types';
 
 import { MockResortRepository } from './mock/resorts';
 import { MockDriverRepository } from './mock/drivers';
 import { MockShiftConfigurationRepository } from './mock/shiftConfiguration';
 import { MockAvailabilityRepository } from './mock/availability';
 import { MockRotaRepository } from './mock/rota';
+import { MockPayrollRulesRepository } from './mock/payrollRules';
 
 import { SupabaseResortRepository } from './supabase/resorts';
 import { SupabaseDriverRepository } from './supabase/drivers';
 import { SupabaseShiftConfigurationRepository } from './supabase/shiftConfiguration';
 import { SupabaseAvailabilityRepository } from './supabase/availability';
 import { SupabaseRotaRepository } from './supabase/rota';
+import { SupabasePayrollRulesRepository } from './supabase/payrollRules';
 
 export interface Repositories {
   resorts: ResortRepository;
@@ -30,6 +39,7 @@ export interface Repositories {
   shiftConfiguration: ShiftConfigurationRepository;
   availability: AvailabilityRepository;
   rota: RotaRepository;
+  payrollRules: PayrollRulesRepository;
 }
 
 function buildRepositories(provider: DataProvider): Repositories {
@@ -40,6 +50,7 @@ function buildRepositories(provider: DataProvider): Repositories {
       shiftConfiguration: new MockShiftConfigurationRepository(),
       availability: new MockAvailabilityRepository(),
       rota: new MockRotaRepository(),
+      payrollRules: new MockPayrollRulesRepository(),
     };
   }
 
@@ -50,6 +61,7 @@ function buildRepositories(provider: DataProvider): Repositories {
     shiftConfiguration: new SupabaseShiftConfigurationRepository(client),
     availability: new SupabaseAvailabilityRepository(client),
     rota: new SupabaseRotaRepository(client),
+    payrollRules: new SupabasePayrollRulesRepository(client),
   };
 }
 

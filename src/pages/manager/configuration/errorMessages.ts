@@ -25,7 +25,7 @@ import { RepositoryError } from '../../../repositories/errors';
  */
 export function describeConfigurationError(
   error: unknown,
-  context: 'driver' | 'shiftType' | 'shiftTemplate' | 'shift' | 'resort',
+  context: 'driver' | 'shiftType' | 'shiftTemplate' | 'shift' | 'resort' | 'payrollRule',
   detail?: { shiftTypeName?: string; weekdayLabel?: string }
 ): string {
   if (!(error instanceof RepositoryError)) {
@@ -37,6 +37,9 @@ export function describeConfigurationError(
   }
   if (context === 'resort') {
     return describeResortError(error);
+  }
+  if (context === 'payrollRule') {
+    return describePayrollRuleError(error);
   }
 
   switch (error.code) {
@@ -117,6 +120,37 @@ function describeResortError(error: RepositoryError): string {
       return 'This resort could not be found. It may have changed elsewhere — refresh and try again.';
     case '55006': // object_in_use — deactivate_resort blocked by active dependents; message already names them
       return stripOperationPrefix(error.message);
+    case '42501':
+      return error.userMessage;
+    case 'mock_unsupported':
+      return 'This action needs Supabase mode (VITE_DATA_PROVIDER=supabase) — not available in this mock demo.';
+    default:
+      return error.userMessage;
+  }
+}
+
+/**
+ * describeConfigurationError's 'payrollRule' branch (Stage 2D Payroll
+ * Checkpoint B). Like 'shift'/'resort', 23514 covers several distinct
+ * first-party business-rule messages this project authored in the same
+ * migration this file is maintained alongside — matched on text, never a
+ * raw Postgres/PostgREST message.
+ */
+function describePayrollRuleError(error: RepositoryError): string {
+  const raw = error.message;
+
+  switch (error.code) {
+    case '23514':
+      if (/already took effect/i.test(raw)) {
+        return "That date is before the current rate's own start. Choose a later date, or edit the rate that's already scheduled for that period.";
+      }
+      return 'Enter an amount of CHF 0 or more.';
+    case '23P01': // exclusion_violation — should not normally surface through these RPCs, kept as a safe fallback
+      return 'That date overlaps a rate that already applies for this period. Choose a different date.';
+    case '23503': // foreign_key_violation — set_shift_base_pay_rate: shift/resort mismatch
+      return 'That Shift is no longer valid for this resort. Refresh and try again.';
+    case 'P0002': // no_data_found — set_driver_delivery_rate: driver not found
+      return 'This driver could not be found. It may have changed elsewhere — refresh and try again.';
     case '42501':
       return error.userMessage;
     case 'mock_unsupported':

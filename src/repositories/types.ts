@@ -26,6 +26,7 @@ import type {
   AvailabilityAnswer,
   AvailabilityStatus,
   ConfirmWeekOutcome,
+  DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
   DriverRecord,
   DriverVisibleAssignment,
@@ -33,6 +34,7 @@ import type {
   MaterialiseShiftsResult,
   ReopenWeekOutcome,
   ResortRecord,
+  ShiftBasePayRuleRecord,
   ShiftInstanceRecord,
   ShiftRecord,
   SupportedLanguageRecord,
@@ -210,4 +212,47 @@ export interface AvailabilityRepository {
 export interface RotaRepository {
   /** Driver-safe "My Rota": own published assignments only, no colleague identities. */
   listDriverVisibleAssignments(driverId: string): Promise<DriverVisibleAssignment[]>;
+}
+
+/**
+ * Stage 2D Payroll Checkpoint B: rate configuration only. Never calculates
+ * payroll, never resolves a rate onto a shift_instance, never touches
+ * attendance/Onfleet/adjustments -- see docs/business-rules.md section G.
+ *
+ * Both `list*` methods return every row for the resort (or driver), active
+ * and historical alike, flat and unfiltered by date -- callers derive
+ * Current (the row covering "today")/Scheduled (effective_from in the
+ * future)/History (effective_to in the past) themselves via one shared
+ * categorisation, exactly the same three-way split for both rate types
+ * (see `categorizeRatePeriods` in `pages/manager/configuration/PayrollRulesPanel.tsx`)
+ * -- this repository layer deliberately does not duplicate that resolution
+ * logic per rate type, and does not expose a bespoke "current rate" RPC,
+ * since the flat list is already small (one row per configured period) and
+ * the categorisation is pure/date-only.
+ */
+export interface PayrollRulesRepository {
+  /** Every shift_base_pay_rules row for shift types at this resort, current and historical alike. */
+  listShiftBasePayRules(resortId: string): Promise<ShiftBasePayRuleRecord[]>;
+  /**
+   * Atomic (set_shift_base_pay_rate). Creates the Shift's first rate, or
+   * schedules a future change -- never overwrites an already-real
+   * historical/in-effect period's own values; a genuine future change
+   * closes the current open-ended row (effective_to = the day before the
+   * new one starts) and inserts a fresh row, while correcting a not-yet-
+   * started future plan updates it in place instead of piling up redundant
+   * rows. Rejects a backdate attempt on/before an already-in-effect rule's
+   * own start, and rejects any other overlap -- the manager never sees a
+   * raw constraint violation, only a mapped, manager-facing message.
+   */
+  setShiftBasePayRate(shiftTypeId: string, resortId: string, basePayChf: number, effectiveFrom?: string): Promise<ShiftBasePayRuleRecord>;
+
+  /** Every driver_delivery_rates row for drivers at this resort, current and historical alike -- grouped by driverId by the caller. Manager-only -- never exposed to any driver-facing path. */
+  listDriverDeliveryRates(resortId: string): Promise<DriverDeliveryRateRecord[]>;
+  /**
+   * Atomic (set_driver_delivery_rate). Same historical-safety shape as
+   * setShiftBasePayRate, keyed by driver instead of Shift. resort_id is
+   * always resolved server-side from the driver's own record, never
+   * client-supplied.
+   */
+  setDriverDeliveryRate(driverId: string, rateChf: number, effectiveFrom?: string): Promise<DriverDeliveryRateRecord>;
 }

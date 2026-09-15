@@ -326,3 +326,32 @@ export interface ApplyTemplateCancellationResult {
   cancelledCount: number;
   cancelledShiftInstanceIds: string[];
 }
+
+// ---------------------------------------------------------------------
+// Stage 2D Payroll Checkpoint B: rate configuration. See
+// docs/business-rules.md section G for the full formula/ownership model.
+// Both are manager-only, effective-dated, and NEVER resolved onto
+// shift_instances -- see repositories/types.ts's PayrollRulesRepository
+// doc comment for how a caller is expected to derive Current/Scheduled/
+// History from the flat list each `list*` method returns.
+// ---------------------------------------------------------------------
+
+/** Maps 1:1 onto a shift_base_pay_rules row. `effectiveTo: null` = open-ended (still the current or most-recently-set version for this Shift). */
+export interface ShiftBasePayRuleRecord {
+  id: string;
+  resortId: string;
+  shiftTypeId: string;
+  basePayChf: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+}
+
+/** Maps 1:1 onto a driver_delivery_rates row. `effectiveTo: null` = open-ended. Manager-only -- a driver must never be able to fetch their own rate through any driver-facing path. */
+export interface DriverDeliveryRateRecord {
+  id: string;
+  resortId: string;
+  driverId: string;
+  rateChf: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+}

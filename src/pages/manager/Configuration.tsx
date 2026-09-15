@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { PageHeader } from '../../components/layout/PageHeader';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { IconPayroll, IconCalendar } from '../../components/ui/icons';
+import { IconCalendar } from '../../components/ui/icons';
 import { DriversPanel } from './configuration/DriversPanel';
 import { ResortShiftSetupPanel } from './configuration/ResortShiftSetupPanel';
+import { PayrollRulesPanel } from './configuration/PayrollRulesPanel';
 
 type Tab = 'drivers' | 'resort-shift-setup' | 'payroll-rules' | 'rota-rules';
 
@@ -41,17 +42,7 @@ export function ConfigurationPage() {
 
       {tab === 'drivers' && <DriversPanel />}
       {tab === 'resort-shift-setup' && <ResortShiftSetupPanel />}
-
-      {tab === 'payroll-rules' && (
-        <Card>
-          <CardHeader title="Payroll rules" />
-          <EmptyState
-            icon={<IconPayroll />}
-            title="Coming in a later stage"
-            hint="Configure base and per-delivery pay for each shift. Not available yet — until then, generated shifts show a Needs Attention notice for any missing pay."
-          />
-        </Card>
-      )}
+      {tab === 'payroll-rules' && <PayrollRulesPanel />}
 
       {tab === 'rota-rules' && (
         <Card>

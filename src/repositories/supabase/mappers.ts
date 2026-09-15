@@ -10,6 +10,7 @@ import type {
   ApplyTemplateRefreshResult,
   AvailabilityAnswer,
   ConfirmWeekOutcome,
+  DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
   DriverRecord,
   DriverVisibleAssignment,
@@ -17,6 +18,7 @@ import type {
   MaterialiseShiftsResult,
   ReopenWeekOutcome,
   ResortRecord,
+  ShiftBasePayRuleRecord,
   ShiftInstanceRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
@@ -48,6 +50,10 @@ type MaterialiseShiftsRow = Database['public']['Functions']['materialise_shift_i
 type TemplateRefreshPreviewDbRow = Database['public']['Functions']['preview_template_refresh']['Returns'][number];
 type ApplyTemplateRefreshRow = Database['public']['Functions']['apply_template_refresh']['Returns'][number];
 type TemplateCancellationPreviewDbRow = Database['public']['Functions']['preview_template_cancellation']['Returns'][number];
+type ShiftBasePayRuleRow = Database['public']['Tables']['shift_base_pay_rules']['Row'];
+type SetShiftBasePayRateRow = Database['public']['Functions']['set_shift_base_pay_rate']['Returns'][number];
+type DriverDeliveryRateRow = Database['public']['Tables']['driver_delivery_rates']['Row'];
+type SetDriverDeliveryRateRow = Database['public']['Functions']['set_driver_delivery_rate']['Returns'][number];
 type ApplyTemplateCancellationRow = Database['public']['Functions']['apply_template_cancellation']['Returns'][number];
 type CreateShiftRow = Database['public']['Functions']['create_shift']['Returns'][number];
 // revise_shift/deactivate_shift/reactivate_shift all return the same single
@@ -294,5 +300,49 @@ export function mapApplyTemplateCancellationResult(row: ApplyTemplateCancellatio
   return {
     cancelledCount: row.cancelled_count,
     cancelledShiftInstanceIds: row.cancelled_shift_instance_ids ?? [],
+  };
+}
+
+export function mapShiftBasePayRule(row: ShiftBasePayRuleRow): ShiftBasePayRuleRecord {
+  return {
+    id: row.id,
+    resortId: row.resort_id,
+    shiftTypeId: row.shift_type_id,
+    basePayChf: row.base_pay_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+export function mapSetShiftBasePayRateResult(row: SetShiftBasePayRateRow): ShiftBasePayRuleRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    shiftTypeId: row.shift_type_id,
+    basePayChf: row.base_pay_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+export function mapDriverDeliveryRate(row: DriverDeliveryRateRow): DriverDeliveryRateRecord {
+  return {
+    id: row.id,
+    resortId: row.resort_id,
+    driverId: row.driver_id,
+    rateChf: row.rate_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+export function mapSetDriverDeliveryRateResult(row: SetDriverDeliveryRateRow): DriverDeliveryRateRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    driverId: row.driver_id,
+    rateChf: row.rate_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
   };
 }

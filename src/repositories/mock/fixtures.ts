@@ -13,9 +13,11 @@
 
 import type {
   AvailabilityAnswer,
+  DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
   DriverRecord,
   ResortRecord,
+  ShiftBasePayRuleRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
   SupportedLanguageRecord,
@@ -97,6 +99,29 @@ export const mockShiftTemplates: ShiftTemplateRecord[] = [
   },
 ];
 
+/**
+ * Mirrors shift_base_pay_rules (Stage 2D Payroll Checkpoint B) -- the two
+ * real Dinner shifts already have the "current real operational value"
+ * (CHF 30) configured, open-ended, matching the product's own stated
+ * starting point. No entry here at all is itself the "Not configured"
+ * state -- never fabricated as CHF 0.
+ */
+export const mockShiftBasePayRules: ShiftBasePayRuleRecord[] = [
+  { id: 'mock-base-pay-crans-dinner', resortId: 'mock-crans', shiftTypeId: 'mock-crans-dinner', basePayChf: 30, effectiveFrom: '2024-01-01', effectiveTo: null },
+  { id: 'mock-base-pay-zermatt-dinner', resortId: 'mock-zermatt', shiftTypeId: 'mock-zermatt-dinner', basePayChf: 30, effectiveFrom: '2024-01-01', effectiveTo: null },
+];
+
+/**
+ * Mirrors driver_delivery_rates -- Gianni and Alex have the current CHF 12
+ * rate configured; Tomas deliberately doesn't, giving the "Not configured"
+ * state a real, natural case in mock mode too (same idiom as
+ * mockDriverOnfleetMappings above).
+ */
+export const mockDriverDeliveryRates: DriverDeliveryRateRecord[] = [
+  { id: 'mock-rate-gianni', resortId: 'mock-crans', driverId: 'mock-gianni', rateChf: 12, effectiveFrom: '2024-01-01', effectiveTo: null },
+  { id: 'mock-rate-alex', resortId: 'mock-zermatt', driverId: 'mock-alex', rateChf: 12, effectiveFrom: '2024-01-01', effectiveTo: null },
+];
+
 /** In-memory availability answers, mutated by setAvailability(). */
 export const mockAvailability: AvailabilityAnswer[] = [];
 
@@ -136,6 +161,18 @@ export function nextMockResortId(): string {
   return `mock-resort-${mockResortSeq}`;
 }
 
+let mockShiftBasePayRuleSeq = 0;
+export function nextMockShiftBasePayRuleId(): string {
+  mockShiftBasePayRuleSeq += 1;
+  return `mock-base-pay-rule-${mockShiftBasePayRuleSeq}`;
+}
+
+let mockDriverDeliveryRateSeq = 0;
+export function nextMockDriverDeliveryRateId(): string {
+  mockDriverDeliveryRateSeq += 1;
+  return `mock-delivery-rate-${mockDriverDeliveryRateSeq}`;
+}
+
 // ---------------------------------------------------------------------
 // Test-only reset: mockResorts/mockDrivers/mockShiftTypes/
 // mockShiftTemplates/mockAvailability are shared, mutable module state, so
@@ -148,6 +185,8 @@ const BASELINE_DRIVERS: DriverRecord[] = mockDrivers.map((d) => ({ ...d }));
 const BASELINE_SHIFT_TYPES: ShiftTypeRecord[] = mockShiftTypes.map((t) => ({ ...t }));
 const BASELINE_SHIFT_TEMPLATES: ShiftTemplateRecord[] = mockShiftTemplates.map((t) => ({ ...t }));
 const BASELINE_ONFLEET_MAPPINGS: DriverOnfleetMappingRecord[] = mockDriverOnfleetMappings.map((m) => ({ ...m }));
+const BASELINE_SHIFT_BASE_PAY_RULES: ShiftBasePayRuleRecord[] = mockShiftBasePayRules.map((r) => ({ ...r }));
+const BASELINE_DRIVER_DELIVERY_RATES: DriverDeliveryRateRecord[] = mockDriverDeliveryRates.map((r) => ({ ...r }));
 
 /** Test-only: restores every mutable fixture array to its module-load baseline. Call from `beforeEach`. */
 export function resetMockFixturesForTesting(): void {
@@ -161,5 +200,9 @@ export function resetMockFixturesForTesting(): void {
   mockShiftTemplates.push(...BASELINE_SHIFT_TEMPLATES.map((t) => ({ ...t })));
   mockDriverOnfleetMappings.length = 0;
   mockDriverOnfleetMappings.push(...BASELINE_ONFLEET_MAPPINGS.map((m) => ({ ...m })));
+  mockShiftBasePayRules.length = 0;
+  mockShiftBasePayRules.push(...BASELINE_SHIFT_BASE_PAY_RULES.map((r) => ({ ...r })));
+  mockDriverDeliveryRates.length = 0;
+  mockDriverDeliveryRates.push(...BASELINE_DRIVER_DELIVERY_RATES.map((r) => ({ ...r })));
   mockAvailability.length = 0;
 }
