@@ -1256,6 +1256,13 @@ export type Database = {
           week_start: string
         }[]
       }
+      create_resort: {
+        Args: { p_name: string }
+        Returns: {
+          resort_id: string
+          slug: string
+        }[]
+      }
       create_shift: {
         Args: {
           p_effective_from?: string
@@ -1283,6 +1290,12 @@ export type Database = {
       }
       current_driver_id: { Args: never; Returns: string }
       current_driver_resort_id: { Args: never; Returns: string }
+      deactivate_resort: {
+        Args: { p_resort_id: string }
+        Returns: {
+          resort_id: string
+        }[]
+      }
       deactivate_shift: {
         Args: {
           p_effective_to?: string
@@ -1340,6 +1353,12 @@ export type Database = {
           shift_type_id: string
           time_would_change: boolean
           will_change: boolean
+        }[]
+      }
+      reactivate_resort: {
+        Args: { p_resort_id: string }
+        Returns: {
+          resort_id: string
         }[]
       }
       reactivate_shift: {

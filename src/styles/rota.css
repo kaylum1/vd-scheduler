@@ -148,9 +148,16 @@
   height: 9px;
   border-radius: 3px;
   flex-shrink: 0;
+  /* Fallback for any resort without a dedicated accent colour below --
+     e.g. one added at runtime via Add Resort (Stage 2D Checkpoint 4.1).
+     Without this, an unrecognised --<slug> modifier class simply matches
+     no rule and the dot renders invisible (no background at all). */
+  background: var(--text-tertiary);
 }
 
-/* Distinct resort accent colours (visual grouping only, not semantic) */
+/* Distinct resort accent colours (visual grouping only, not semantic) --
+   a fixed palette for the resorts known at design time; anything else
+   uses the neutral fallback above. */
 .resort-dot--crans-montana {
   background: #2563eb;
 }

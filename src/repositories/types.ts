@@ -42,8 +42,27 @@ import type {
 } from './domain';
 
 export interface ResortRepository {
+  /** Every resort, active and inactive alike -- callers decide what to show where (Stage 2D Checkpoint 4.1 §5: operational selectors filter to active themselves; management/reporting views want everything). */
   listResorts(): Promise<ResortRecord[]>;
   getResortById(resortId: string): Promise<ResortRecord | null>;
+
+  /**
+   * Atomic (create_resort). The internal `slug` is generated server-side
+   * from the name (disambiguated on collision) -- the manager never sees
+   * or supplies it. No timezone input: the column's own default
+   * (Europe/Zurich) applies untouched.
+   */
+  createResort(name: string): Promise<{ resortId: string; slug: string }>;
+  /**
+   * Atomic (deactivate_resort). Never deletes the row and never cascades
+   * to its drivers/shifts/instances/publications -- rejected if the
+   * resort still has any operationally-active dependent (active drivers,
+   * active shifts, upcoming generated shift instances, a published week),
+   * surfaced as a manager-facing error naming what's blocking it.
+   */
+  deactivateResort(resortId: string): Promise<{ resortId: string }>;
+  /** Atomic (reactivate_resort). Restores the same row -- same id, same slug, same historical relationships. Never creates a replacement resort. */
+  reactivateResort(resortId: string): Promise<{ resortId: string }>;
 }
 
 export interface DriverRepository {

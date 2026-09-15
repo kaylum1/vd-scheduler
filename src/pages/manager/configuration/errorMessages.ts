@@ -17,10 +17,15 @@ import { RepositoryError } from '../../../repositories/errors';
  * the same migration this file is maintained alongside — not an opaque
  * Postgres/constraint-name string. Matching on it here is what lets each
  * one map to its own precise, still-never-raw manager-facing sentence.
+ * The 'resort' context (Stage 2D Checkpoint 4.1) follows the same idiom,
+ * plus one addition: deactivate_resort's 55006 message is itself already
+ * manager-facing, dynamic, first-party copy (it names exactly which
+ * dependents are blocking) -- passed through as-is rather than replaced
+ * with a generic sentence that would lose that detail.
  */
 export function describeConfigurationError(
   error: unknown,
-  context: 'driver' | 'shiftType' | 'shiftTemplate' | 'shift',
+  context: 'driver' | 'shiftType' | 'shiftTemplate' | 'shift' | 'resort',
   detail?: { shiftTypeName?: string; weekdayLabel?: string }
 ): string {
   if (!(error instanceof RepositoryError)) {
@@ -29,6 +34,9 @@ export function describeConfigurationError(
 
   if (context === 'shift') {
     return describeShiftError(error, detail);
+  }
+  if (context === 'resort') {
+    return describeResortError(error);
   }
 
   switch (error.code) {
@@ -86,6 +94,29 @@ function describeShiftError(error: RepositoryError, detail?: { shiftTypeName?: s
       return `There is already a ${detail?.shiftTypeName ?? 'shift'} schedule covering ${detail?.weekdayLabel ?? 'this day'} for these dates.`;
     case '23503':
       return 'That resort is no longer valid. Refresh and try again.';
+    case '42501':
+      return error.userMessage;
+    case 'mock_unsupported':
+      return 'This action needs Supabase mode (VITE_DATA_PROVIDER=supabase) — not available in this mock demo.';
+    default:
+      return error.userMessage;
+  }
+}
+
+/** Strips unwrap()'s "<operation> failed: " prefix (Supabase path only -- the mock repositories throw the bare message directly), so both providers show identical, exact copy for messages meant to be passed through verbatim. */
+function stripOperationPrefix(message: string): string {
+  return message.replace(/^[\w.]+ failed:\s*/, '');
+}
+
+/** describeConfigurationError's 'resort' branch — see its doc comment for why the 55006 message is passed through rather than replaced. */
+function describeResortError(error: RepositoryError): string {
+  switch (error.code) {
+    case '23514': // create_resort: blank name
+      return 'Give this resort a name.';
+    case 'P0002': // no_data_found — the resort record itself couldn't be found
+      return 'This resort could not be found. It may have changed elsewhere — refresh and try again.';
+    case '55006': // object_in_use — deactivate_resort blocked by active dependents; message already names them
+      return stripOperationPrefix(error.message);
     case '42501':
       return error.userMessage;
     case 'mock_unsupported':

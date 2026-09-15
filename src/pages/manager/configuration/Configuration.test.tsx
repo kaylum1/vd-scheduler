@@ -48,19 +48,19 @@ afterEach(() => {
 describe('Configuration: Resorts (live, via ResortRepository)', () => {
   it('1. live resorts load from the repository, not a hard-coded list', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
-    expect(await screen.findByRole('tab', { name: /Crans-Montana/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Zermatt/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Verbier/ })).toBeInTheDocument();
+    expect(await screen.findByText('Crans-Montana')).toBeInTheDocument();
+    expect(screen.getByText('Zermatt')).toBeInTheDocument();
+    expect(screen.getByText('Verbier')).toBeInTheDocument();
   });
 
   it('2. selecting a different resort changes the shift query', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
-    await screen.findByRole('tab', { name: /Crans-Montana/ });
+    await screen.findByText('Crans-Montana');
 
     // Crans-Montana is selected by default (first resort loaded).
     await waitFor(() => expect(within(shiftSetupCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('tab', { name: /Zermatt/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Zermatt/ }));
 
     await waitFor(() => expect(screen.getByText(/Shift setup — Zermatt/)).toBeInTheDocument());
     await waitFor(() => expect(within(shiftSetupCard('Zermatt')).getByText('Dinner')).toBeInTheDocument()); // Zermatt also has one, different row underneath

@@ -130,13 +130,20 @@ export function nextMockOnfleetMappingId(): string {
   return `mock-onfleet-mapping-${mockOnfleetMappingSeq}`;
 }
 
+let mockResortSeq = 0;
+export function nextMockResortId(): string {
+  mockResortSeq += 1;
+  return `mock-resort-${mockResortSeq}`;
+}
+
 // ---------------------------------------------------------------------
-// Test-only reset: mockDrivers/mockShiftTypes/mockShiftTemplates/
-// mockAvailability are shared, mutable module state, so a test that
-// creates/edits/deactivates something leaks into the next test in the same
-// file unless reset. Deep-cloned once at module load, before anything can
-// have mutated them.
+// Test-only reset: mockResorts/mockDrivers/mockShiftTypes/
+// mockShiftTemplates/mockAvailability are shared, mutable module state, so
+// a test that creates/edits/deactivates something leaks into the next test
+// in the same file unless reset. Deep-cloned once at module load, before
+// anything can have mutated them.
 // ---------------------------------------------------------------------
+const BASELINE_RESORTS: ResortRecord[] = mockResorts.map((r) => ({ ...r }));
 const BASELINE_DRIVERS: DriverRecord[] = mockDrivers.map((d) => ({ ...d }));
 const BASELINE_SHIFT_TYPES: ShiftTypeRecord[] = mockShiftTypes.map((t) => ({ ...t }));
 const BASELINE_SHIFT_TEMPLATES: ShiftTemplateRecord[] = mockShiftTemplates.map((t) => ({ ...t }));
@@ -144,6 +151,8 @@ const BASELINE_ONFLEET_MAPPINGS: DriverOnfleetMappingRecord[] = mockDriverOnflee
 
 /** Test-only: restores every mutable fixture array to its module-load baseline. Call from `beforeEach`. */
 export function resetMockFixturesForTesting(): void {
+  mockResorts.length = 0;
+  mockResorts.push(...BASELINE_RESORTS.map((r) => ({ ...r })));
   mockDrivers.length = 0;
   mockDrivers.push(...BASELINE_DRIVERS.map((d) => ({ ...d })));
   mockShiftTypes.length = 0;

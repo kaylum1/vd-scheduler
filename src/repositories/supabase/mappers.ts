@@ -28,6 +28,10 @@ import type {
 } from '../domain';
 
 type ResortRow = Database['public']['Tables']['resorts']['Row'];
+type CreateResortRow = Database['public']['Functions']['create_resort']['Returns'][number];
+// deactivate_resort/reactivate_resort both return the same single
+// { resort_id } shape -- one shared row type/mapper for both.
+type ResortMutationRow = { resort_id: string };
 type DriverRow = Database['public']['Tables']['drivers']['Row'];
 type SupportedLanguageRow = Database['public']['Tables']['supported_languages']['Row'];
 type DriverOnfleetMappingRow = Database['public']['Tables']['driver_onfleet_mappings']['Row'];
@@ -58,6 +62,16 @@ export function mapResort(row: ResortRow): ResortRecord {
     timezone: row.timezone,
     isActive: row.is_active,
   };
+}
+
+/** create_resort's row also carries the auto-generated slug -- never surfaced to the manager, kept here only in case a caller ever needs it for logging/debugging. */
+export function mapCreateResortResult(row: CreateResortRow): { resortId: string; slug: string } {
+  return { resortId: row.resort_id, slug: row.slug };
+}
+
+/** Shared by deactivate_resort/reactivate_resort -- both return just the resort id. */
+export function mapResortMutationResult(row: ResortMutationRow): { resortId: string } {
+  return { resortId: row.resort_id };
 }
 
 export function mapDriver(row: DriverRow): DriverRecord {
