@@ -761,6 +761,23 @@
   padding: 0 18px 12px;
 }
 
+/* Checkpoint 4.1 UX amendment: names which resort "Shift Setup" applies to
+   and points back at the "Choose resort" control above it -- so a manager
+   never has to guess which resort's shifts they're editing. */
+.shift-setup-hint {
+  margin: 0;
+  padding: 10px 18px 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+/* Checkpoint 4.1: the "Choose resort" selector re-uses .segmented's pill
+   styling (same control already used for the Active/Inactive/All filters)
+   -- this alias just gives it card padding under its own CardHeader. */
+.resort-chooser {
+  padding: 0 18px 18px;
+}
+
 .shift-setup-list {
   display: flex;
   flex-direction: column;

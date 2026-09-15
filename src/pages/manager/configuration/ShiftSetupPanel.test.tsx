@@ -23,7 +23,7 @@ function renderPanel() {
 }
 
 function shiftSetupCard(): HTMLElement {
-  return screen.getByText(/Shift setup — Crans-Montana/).closest('.card') as HTMLElement;
+  return screen.getByText(/Shift Setup — Crans-Montana/).closest('.card') as HTMLElement;
 }
 
 /**
@@ -85,6 +85,13 @@ describe('ShiftSetupPanel: display (manager-facing "Shift", not shift type/templ
     renderPanel();
     await screen.findByText('Dinner');
     expect(within(shiftSetupCard()).queryByText('dinner')).not.toBeInTheDocument();
+  });
+
+  it('4a. the heading names the resort explicitly ("Shift Setup — <resort>"), and a helper line explains the selector above it (Checkpoint 4.1 UX amendment)', async () => {
+    renderPanel();
+    await screen.findByText('Dinner');
+    expect(screen.getByRole('heading', { name: 'Shift Setup — Crans-Montana' })).toBeInTheDocument();
+    expect(screen.getByText('Choose a resort above to edit its shifts.')).toBeInTheDocument();
   });
 
   it('5. timezone is never shown in Shift Setup', async () => {

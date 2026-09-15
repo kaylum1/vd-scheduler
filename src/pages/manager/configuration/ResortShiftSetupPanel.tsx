@@ -16,10 +16,14 @@ type ResortFilter = 'active' | 'inactive' | 'all';
 
 /**
  * Stage 2D Checkpoint 4.1: resort lifecycle management (Add/Deactivate/
- * Reactivate), plus the resort picker that decides which ACTIVE resort's
- * Shift Setup is shown below -- matching §5's "normal operational
- * selectors show active resorts only" (this picker is exactly that kind
- * of selector: it decides where a manager can create/edit shifts).
+ * Reactivate). Checkpoint 4.1 UX amendment: resort *selection* for Shift
+ * Setup is a separate, explicit "Choose resort" control below -- manual
+ * testing found that folding selection into the Resorts management list
+ * (clicking a row) left it unclear which resort's shifts were currently
+ * being edited. The Resorts list below is lifecycle management only; it
+ * no longer doubles as the selector. The "Choose resort" control only
+ * ever lists ACTIVE resorts, matching §5's "normal operational selectors
+ * show active resorts only".
  */
 export function ResortShiftSetupPanel() {
   const queryClient = useQueryClient();
@@ -105,8 +109,6 @@ export function ResortShiftSetupPanel() {
               <ResortRow
                 key={resort.id}
                 resort={resort}
-                isSelected={resort.id === selectedResortId}
-                onSelect={() => setSelectedResortId(resort.id)}
                 onDeactivate={() => setDeactivatingResort(resort)}
                 onReactivated={invalidate}
               />
@@ -114,6 +116,25 @@ export function ResortShiftSetupPanel() {
           </div>
         )}
       </Card>
+
+      {activeResorts.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <CardHeader title="Choose resort" />
+          <div className="resort-chooser segmented" role="tablist" aria-label="Choose resort">
+            {activeResorts.map((resort) => (
+              <button
+                key={resort.id}
+                role="tab"
+                aria-selected={resort.id === selectedResortId}
+                className={`segmented__item${resort.id === selectedResortId ? ' is-active' : ''}`}
+                onClick={() => setSelectedResortId(resort.id)}
+              >
+                {resort.name}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {showAdd && (
         <AddResortModal
@@ -153,14 +174,10 @@ export function ResortShiftSetupPanel() {
 
 function ResortRow({
   resort,
-  isSelected,
-  onSelect,
   onDeactivate,
   onReactivated,
 }: {
   resort: ResortRecord;
-  isSelected: boolean;
-  onSelect: () => void;
   onDeactivate: () => void;
   onReactivated: () => void;
 }) {
@@ -171,19 +188,10 @@ function ResortRow({
 
   return (
     <div className="config-list-item shift-setup-card">
-      <div
-        className="config-list-item__main"
-        style={resort.isActive ? { cursor: 'pointer' } : undefined}
-        onClick={resort.isActive ? onSelect : undefined}
-        onKeyDown={resort.isActive ? (e) => (e.key === 'Enter' || e.key === ' ') && onSelect() : undefined}
-        role={resort.isActive ? 'button' : undefined}
-        tabIndex={resort.isActive ? 0 : undefined}
-        aria-pressed={resort.isActive ? isSelected : undefined}
-      >
+      <div className="config-list-item__main">
         <span className={`resort-dot resort-dot--${resort.slug}`} aria-hidden="true" />
         <div>
           <div className="config-list-item__title">{resort.name}</div>
-          {isSelected && resort.isActive && <div className="config-list-item__subtitle">Now configuring</div>}
         </div>
       </div>
       <div className="config-list-item__badges">

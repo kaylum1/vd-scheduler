@@ -26,11 +26,21 @@ function renderWithQueryClient(ui: React.ReactElement) {
 
 /**
  * Scopes queries to the Shift Setup card specifically (found via its own
- * "Shift setup — <resort>" header) rather than the whole page — see
+ * "Shift Setup — <resort>" header) rather than the whole page — see
  * ShiftSetupPanel.test.tsx for that component's own detailed coverage.
  */
 function shiftSetupCard(resortName: string): HTMLElement {
-  return screen.getByText(new RegExp(`Shift setup — ${resortName}`)).closest('.card') as HTMLElement;
+  return screen.getByText(new RegExp(`Shift Setup — ${resortName}`)).closest('.card') as HTMLElement;
+}
+
+/**
+ * Checkpoint 4.1 UX amendment: a resort's name now appears twice while
+ * active (the Resorts management list, and the "Choose resort" selector),
+ * so a bare `screen.getByText(resortName)` is ambiguous -- scope to the
+ * management list specifically via its own "Resorts" heading.
+ */
+function resortsListCard(): HTMLElement {
+  return screen.getByRole('heading', { name: 'Resorts' }).closest('.card') as HTMLElement;
 }
 
 beforeEach(() => {
@@ -48,21 +58,21 @@ afterEach(() => {
 describe('Configuration: Resorts (live, via ResortRepository)', () => {
   it('1. live resorts load from the repository, not a hard-coded list', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
-    expect(await screen.findByText('Crans-Montana')).toBeInTheDocument();
-    expect(screen.getByText('Zermatt')).toBeInTheDocument();
-    expect(screen.getByText('Verbier')).toBeInTheDocument();
+    expect(await within(resortsListCard()).findByText('Crans-Montana')).toBeInTheDocument();
+    expect(within(resortsListCard()).getByText('Zermatt')).toBeInTheDocument();
+    expect(within(resortsListCard()).getByText('Verbier')).toBeInTheDocument();
   });
 
   it('2. selecting a different resort changes the shift query', async () => {
     renderWithQueryClient(<ResortShiftSetupPanel />);
-    await screen.findByText('Crans-Montana');
+    await within(resortsListCard()).findByText('Crans-Montana');
 
     // Crans-Montana is selected by default (first resort loaded).
     await waitFor(() => expect(within(shiftSetupCard('Crans-Montana')).getByText('Dinner')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Zermatt/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Zermatt' }));
 
-    await waitFor(() => expect(screen.getByText(/Shift setup — Zermatt/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Shift Setup — Zermatt/)).toBeInTheDocument());
     await waitFor(() => expect(within(shiftSetupCard('Zermatt')).getByText('Dinner')).toBeInTheDocument()); // Zermatt also has one, different row underneath
   });
 

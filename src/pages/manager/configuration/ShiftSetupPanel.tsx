@@ -94,7 +94,7 @@ export function ShiftSetupPanel({ resortId, resortName }: { resortId: string; re
   return (
     <Card style={{ marginTop: 16 }}>
       <CardHeader
-        title={`Shift setup — ${resortName}`}
+        title={`Shift Setup — ${resortName}`}
         action={
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Button variant="secondary" size="sm" onClick={() => setShowRefreshDialog(true)}>
@@ -110,6 +110,7 @@ export function ShiftSetupPanel({ resortId, resortName }: { resortId: string; re
           </div>
         }
       />
+      <p className="shift-setup-hint">Choose a resort above to edit its shifts.</p>
 
       {materialiseNotice && (
         <div style={{ padding: '12px 18px 0' }}>

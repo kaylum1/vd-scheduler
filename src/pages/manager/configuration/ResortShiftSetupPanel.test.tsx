@@ -30,6 +30,14 @@ function resortRow(name: string): HTMLElement {
   return within(resortsCard()).getByText(name).closest('.shift-setup-card') as HTMLElement;
 }
 
+function chooserCard(): HTMLElement {
+  return screen.getByRole('heading', { name: 'Choose resort' }).closest('.card') as HTMLElement;
+}
+
+function chooserTab(name: string): HTMLElement {
+  return within(chooserCard()).getByRole('tab', { name });
+}
+
 beforeEach(() => {
   resetMockFixturesForTesting();
   resetRepositoriesForTesting();
@@ -42,7 +50,7 @@ afterEach(() => {
 describe('ResortShiftSetupPanel: Add Resort (Stage 2D Checkpoint 4.1)', () => {
   it('the Add Resort form asks only for a name -- no id/slug/timezone', async () => {
     renderPanel();
-    await screen.findByText('Crans-Montana');
+    await within(resortsCard()).findByText('Crans-Montana');
     fireEvent.click(screen.getByRole('button', { name: /Add Resort/i }));
 
     const dialog = screen.getByRole('dialog');
@@ -55,20 +63,20 @@ describe('ResortShiftSetupPanel: Add Resort (Stage 2D Checkpoint 4.1)', () => {
   it('creating a resort goes through the repository, appears in the list, and never shows the generated internal key/id anywhere', async () => {
     const spy = vi.spyOn(MockResortRepository.prototype, 'createResort');
     renderPanel();
-    await screen.findByText('Crans-Montana');
+    await within(resortsCard()).findByText('Crans-Montana');
 
     fireEvent.click(screen.getByRole('button', { name: /Add Resort/i }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Val Thorens' } });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add Resort' }));
 
     await waitFor(() => expect(spy).toHaveBeenCalledWith('Val Thorens'));
-    expect(await screen.findByText('Val Thorens')).toBeInTheDocument();
+    expect(await within(resortsCard()).findByText('Val Thorens')).toBeInTheDocument();
     expect(screen.queryByText(/val-thorens/)).not.toBeInTheDocument(); // the auto-generated slug is never shown
   });
 
   it('a duplicate/conflicting resort name is handled cleanly -- created, not rejected, and the disambiguated slug is invisible', async () => {
     renderPanel();
-    await screen.findByText('Crans-Montana');
+    await within(resortsCard()).findByText('Crans-Montana');
 
     fireEvent.click(screen.getByRole('button', { name: /Add Resort/i }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Crans-Montana' } });
@@ -80,7 +88,7 @@ describe('ResortShiftSetupPanel: Add Resort (Stage 2D Checkpoint 4.1)', () => {
 
   it('rejects a blank name without a crash', async () => {
     renderPanel();
-    await screen.findByText('Crans-Montana');
+    await within(resortsCard()).findByText('Crans-Montana');
     fireEvent.click(screen.getByRole('button', { name: /Add Resort/i }));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Add Resort' }));
 
@@ -91,7 +99,7 @@ describe('ResortShiftSetupPanel: Add Resort (Stage 2D Checkpoint 4.1)', () => {
 describe('ResortShiftSetupPanel: Deactivate / Reactivate (Stage 2D Checkpoint 4.1)', () => {
   it('deactivating an unused resort (Verbier) requires confirmation and explains retention', async () => {
     renderPanel();
-    await screen.findByText('Verbier');
+    await within(resortsCard()).findByText('Verbier');
     fireEvent.click(within(resortRow('Verbier')).getByRole('button', { name: 'Deactivate' }));
 
     await screen.findByRole('heading', { name: 'Deactivate Verbier?' });
@@ -102,7 +110,7 @@ describe('ResortShiftSetupPanel: Deactivate / Reactivate (Stage 2D Checkpoint 4.
 
   it('confirming deactivates it, and it moves from Active to the Inactive filter -- never hidden permanently', async () => {
     renderPanel();
-    await screen.findByText('Verbier');
+    await within(resortsCard()).findByText('Verbier');
     fireEvent.click(within(resortRow('Verbier')).getByRole('button', { name: 'Deactivate' }));
     await screen.findByRole('heading', { name: 'Deactivate Verbier?' });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
@@ -116,7 +124,7 @@ describe('ResortShiftSetupPanel: Deactivate / Reactivate (Stage 2D Checkpoint 4.
 
   it('an unsafe deactivation (active driver at the resort) is blocked with a clear explanation, and nothing is silently changed', async () => {
     renderPanel();
-    await screen.findByText('Crans-Montana');
+    await within(resortsCard()).findByText('Crans-Montana');
     fireEvent.click(within(resortRow('Crans-Montana')).getByRole('button', { name: 'Deactivate' }));
     await screen.findByRole('heading', { name: 'Deactivate Crans-Montana?' });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
@@ -130,17 +138,21 @@ describe('ResortShiftSetupPanel: Deactivate / Reactivate (Stage 2D Checkpoint 4.
 
   it('reactivating restores the same resort (same name, same identity) without a confirmation step', async () => {
     renderPanel();
-    await screen.findByText('Verbier');
+    await within(resortsCard()).findByText('Verbier');
     fireEvent.click(within(resortRow('Verbier')).getByRole('button', { name: 'Deactivate' }));
     await screen.findByRole('heading', { name: 'Deactivate Verbier?' });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
     fireEvent.click(within(resortsCard()).getByRole('tab', { name: 'Inactive' }));
-    await screen.findByText('Verbier');
+    // Scoped, not `screen.findByText` -- unscoped, "Verbier" can transiently
+    // still match the "Choose resort" chooser while the deactivation's
+    // refetch is still in flight (stale active data), giving a false-positive
+    // resolve before the Inactive-filtered row has actually appeared.
+    await within(resortsCard()).findByText('Verbier');
 
     fireEvent.click(within(resortRow('Verbier')).getByRole('button', { name: 'Reactivate' }));
 
     fireEvent.click(within(resortsCard()).getByRole('tab', { name: 'Active' }));
-    expect(await screen.findByText('Verbier')).toBeInTheDocument();
+    expect(await within(resortsCard()).findByText('Verbier')).toBeInTheDocument();
     expect(within(resortRow('Verbier')).getByText('Active')).toBeInTheDocument();
   });
 });
@@ -148,37 +160,37 @@ describe('ResortShiftSetupPanel: Deactivate / Reactivate (Stage 2D Checkpoint 4.
 describe('ResortShiftSetupPanel: filters and selector behaviour (Stage 2D Checkpoint 4.1 §5)', () => {
   it('Active/Inactive/All filters the Resorts list', async () => {
     renderPanel();
-    await screen.findByText('Verbier');
+    await within(resortsCard()).findByText('Verbier');
     fireEvent.click(within(resortRow('Verbier')).getByRole('button', { name: 'Deactivate' }));
     await screen.findByRole('heading', { name: 'Deactivate Verbier?' });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
     await waitFor(() => expect(screen.queryByText('Verbier')).not.toBeInTheDocument());
 
     fireEvent.click(within(resortsCard()).getByRole('tab', { name: 'All' }));
-    expect(await screen.findByText('Verbier')).toBeInTheDocument();
-    expect(screen.getByText('Crans-Montana')).toBeInTheDocument(); // still active, still shown under "All"
+    expect(await within(resortsCard()).findByText('Verbier')).toBeInTheDocument();
+    expect(within(resortsCard()).getByText('Crans-Montana')).toBeInTheDocument(); // still active, still shown under "All"
   });
 
-  it('the Shift Setup resort picker (an operational selector) excludes inactive resorts entirely', async () => {
+  it('the "Choose resort" selector (an operational selector) excludes inactive resorts entirely', async () => {
     renderPanel();
-    await screen.findByText('Verbier');
+    await within(resortsCard()).findByText('Verbier');
     fireEvent.click(within(resortRow('Verbier')).getByRole('button', { name: 'Deactivate' }));
     await screen.findByRole('heading', { name: 'Deactivate Verbier?' });
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
     await waitFor(() => expect(screen.queryByText('Verbier')).not.toBeInTheDocument());
 
-    // Verbier is still visible under "All" (historical/reporting context),
-    // but it is not clickable as a Shift Setup target, and Shift Setup
-    // never renders for it.
+    // Verbier is still visible under "All" in the Resorts management list
+    // (historical/reporting context), but it never appears as a choice in
+    // "Choose resort", and Shift Setup never renders for it.
     fireEvent.click(within(resortsCard()).getByRole('tab', { name: 'All' }));
-    await screen.findByText('Verbier');
-    expect(within(resortRow('Verbier')).queryByRole('button', { name: /Verbier/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Shift setup — Verbier/)).not.toBeInTheDocument();
+    await screen.findByText('Verbier'); // present in the management list...
+    expect(within(chooserCard()).queryByRole('tab', { name: 'Verbier' })).not.toBeInTheDocument(); // ...but not the chooser
+    expect(screen.queryByText(/Shift Setup — Verbier/)).not.toBeInTheDocument();
   });
 
   it('deactivating the currently-configured resort falls back to another active one', async () => {
     renderPanel();
-    await screen.findByText(/Shift setup — Crans-Montana/);
+    await screen.findByText(/Shift Setup — Crans-Montana/);
 
     fireEvent.click(within(resortRow('Crans-Montana')).getByRole('button', { name: 'Deactivate' }));
     await screen.findByRole('heading', { name: 'Deactivate Crans-Montana?' });
@@ -193,7 +205,7 @@ describe('ResortShiftSetupPanel: filters and selector behaviour (Stage 2D Checkp
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
 
     // Crans-Montana (still active) remains configured -- Shift Setup never disappears.
-    await waitFor(() => expect(screen.getByText(/Shift setup — Crans-Montana/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Shift Setup — Crans-Montana/)).toBeInTheDocument());
   });
 
   it('historical data can still resolve an inactive resort by id (getResortById is not filtered)', async () => {
@@ -201,6 +213,72 @@ describe('ResortShiftSetupPanel: filters and selector behaviour (Stage 2D Checkp
     await repo.deactivateResort('mock-verbier');
     const resort = await repo.getResortById('mock-verbier');
     expect(resort).toMatchObject({ id: 'mock-verbier', name: 'Verbier', isActive: false });
+  });
+});
+
+// =======================================================================
+// "Choose resort" selection clarity (Checkpoint 4.1 UX amendment)
+// =======================================================================
+// Manual testing found it unclear which resort's shifts were being edited
+// when selection was folded into the Resorts management list. These tests
+// cover the standalone "Choose resort" control introduced to fix that.
+describe('ResortShiftSetupPanel: "Choose resort" selection clarity (Checkpoint 4.1 UX amendment)', () => {
+  it('the Shift Setup heading explicitly names the selected resort', async () => {
+    renderPanel();
+    expect(await screen.findByRole('heading', { name: 'Shift Setup — Crans-Montana' })).toBeInTheDocument();
+  });
+
+  it('a helper line explains that the resort is chosen above', async () => {
+    renderPanel();
+    await screen.findByRole('heading', { name: 'Shift Setup — Crans-Montana' });
+    expect(screen.getByText('Choose a resort above to edit its shifts.')).toBeInTheDocument();
+  });
+
+  it('clicking another resort in the chooser immediately updates the heading and the displayed shifts', async () => {
+    renderPanel();
+    await screen.findByRole('heading', { name: 'Shift Setup — Crans-Montana' });
+
+    fireEvent.click(chooserTab('Zermatt'));
+
+    expect(await screen.findByRole('heading', { name: 'Shift Setup — Zermatt' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Shift Setup — Crans-Montana' })).not.toBeInTheDocument();
+    // Zermatt's own Dinner shift (a different row from Crans-Montana's) is now shown.
+    await waitFor(() => expect(within(screen.getByRole('heading', { name: 'Shift Setup — Zermatt' }).closest('.card') as HTMLElement).getByText('Dinner')).toBeInTheDocument());
+  });
+
+  it('the currently selected resort has a clearly visible selected/active state in the chooser, and only one resort is selected at a time', async () => {
+    renderPanel();
+    await screen.findByRole('heading', { name: 'Shift Setup — Crans-Montana' });
+
+    expect(chooserTab('Crans-Montana')).toHaveAttribute('aria-selected', 'true');
+    expect(chooserTab('Crans-Montana').className).toMatch(/is-active/);
+    expect(chooserTab('Zermatt')).toHaveAttribute('aria-selected', 'false');
+    expect(chooserTab('Zermatt').className).not.toMatch(/is-active/);
+
+    fireEvent.click(chooserTab('Zermatt'));
+    await screen.findByRole('heading', { name: 'Shift Setup — Zermatt' });
+
+    expect(chooserTab('Zermatt')).toHaveAttribute('aria-selected', 'true');
+    expect(chooserTab('Crans-Montana')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('an inactive resort never appears as a choice in the chooser', async () => {
+    const repo = new MockResortRepository();
+    await repo.deactivateResort('mock-verbier');
+    renderPanel();
+    await screen.findByRole('heading', { name: 'Shift Setup — Crans-Montana' });
+
+    expect(within(chooserCard()).queryByRole('tab', { name: 'Verbier' })).not.toBeInTheDocument();
+    expect(within(chooserCard()).getByRole('tab', { name: 'Zermatt' })).toBeInTheDocument();
+  });
+
+  it('the chooser re-uses the already mobile-verified .segmented pill control -- wraps cleanly, no fixed pixel widths', () => {
+    // Structural guard (matches the convention in Configuration.test.tsx's
+    // UI 17): the chooser is built from the same .segmented control already
+    // proven to wrap without horizontal overflow at a 375px viewport (the
+    // Active/Inactive/All filters above it), not new, unverified markup.
+    expect(resortShiftSetupPanelSource).toMatch(/resort-chooser segmented/);
+    expect(resortShiftSetupPanelSource).not.toMatch(/width:\s*\d+px/);
   });
 });
 
