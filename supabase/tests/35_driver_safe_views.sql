@@ -32,11 +32,15 @@ end $$;
 -- driver_visible_shifts: never exposes pay/premium/headcount/internal
 -- config columns (structural), and only shows the driver's own resort.
 -- ---------------------------------------------------------------------
-select pg_temp.expect_true('driver_visible_shifts: no pay/premium/headcount/internal columns exist on the view at all',
+-- base_pay_chf/delivery_rate_chf are no longer even columns on
+-- shift_instances (Stage 2D Payroll Checkpoint A) -- checking for their
+-- absence from this view too would be vacuous; see 60_payroll_rota_rules.sql
+-- for that structural proof directly.
+select pg_temp.expect_true('driver_visible_shifts: no premium/headcount/internal columns exist on the view at all',
   not exists (
     select 1 from information_schema.columns
     where table_schema = 'public' and table_name = 'driver_visible_shifts'
-      and column_name in ('is_premium', 'base_pay_chf', 'delivery_rate_chf', 'required_drivers', 'template_id', 'origin', 'cancelled_reason', 'cancelled_by')
+      and column_name in ('is_premium', 'required_drivers', 'template_id', 'origin', 'cancelled_reason', 'cancelled_by')
   ));
 
 select pg_temp.act_as('authenticated', current_setting('dbtest.driver_a_user_id')::uuid);

@@ -158,8 +158,6 @@ export function mapShiftInstance(row: ShiftInstanceRow): ShiftInstanceRecord {
     startTime: row.start_time,
     endTime: row.end_time,
     requiredDrivers: row.required_drivers,
-    basePayChf: row.base_pay_chf,
-    deliveryRateChf: row.delivery_rate_chf,
     isPremium: row.is_premium,
     // status/origin are CHECK-constrained at the DB level (migration 06)
     // but the generator can't see CHECK constraints, only the base `text`
@@ -250,7 +248,6 @@ export function mapMaterialiseShiftsResult(row: MaterialiseShiftsRow): Materiali
     skippedExistingCount: row.skipped_existing_count,
     fromDate: row.from_date,
     toDate: row.to_date,
-    missingPayrollRuleCount: row.missing_payroll_rule_count,
     missingRotaRuleCount: row.missing_rota_rule_count,
   };
 }

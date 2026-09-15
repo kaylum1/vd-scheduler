@@ -419,13 +419,12 @@ describe('ShiftSetupPanel: Reactivate Shift', () => {
 // MATERIALISATION
 // =======================================================================
 describe('ShiftSetupPanel: Generate upcoming shifts', () => {
-  it('32/33/34. missing Payroll/Rota Rule counts are shown as an informational notice, never a generation failure', async () => {
+  it('32/33/34. a missing Rota Rule count is shown as an informational notice, never a generation failure -- and shift generation never mentions Payroll Rules at all (Stage 2D Payroll Checkpoint A)', async () => {
     vi.spyOn(MockShiftConfigurationRepository.prototype, 'materialiseShifts').mockResolvedValue({
       createdCount: 42,
       skippedExistingCount: 14,
       fromDate: '2026-01-01',
       toDate: '2026-02-28',
-      missingPayrollRuleCount: 42,
       missingRotaRuleCount: 10,
     });
 
@@ -435,8 +434,8 @@ describe('ShiftSetupPanel: Generate upcoming shifts', () => {
 
     expect(await screen.findByText(/42 shifts created/)).toBeInTheDocument();
     expect(screen.getByText(/14 already existed/)).toBeInTheDocument();
-    expect(screen.getByText(/42 shifts have no Payroll Rule configured/)).toBeInTheDocument();
     expect(screen.getByText(/10 shifts have no Rota Rule configured/)).toBeInTheDocument();
+    expect(screen.queryByText(/Payroll Rule/)).not.toBeInTheDocument();
     // Not a failure state -- no error notice/role=alert rendered for this outcome.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });

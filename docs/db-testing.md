@@ -69,10 +69,12 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `35_driver_safe_views.sql` | `driver_visible_shifts` / `driver_visible_assignments` — the driver-facing security boundary views |
 | `40_materialisation_template_safety.sql` | Insert-only + idempotent materialisation, effective template selection, override/adhoc/published/attendance refresh protection, cancellation preview/apply, operational timezone + DST |
 | `50_language_onfleet.sql` | `preferred_language`, Onfleet mapping uniqueness/atomicity |
-| `60_payroll_rota_rules.sql` | `payroll_rules`/`rota_rules_*` effective dating, precedence (date > weekday > default), missing-config behaviour (Stage 2D Checkpoint 3) |
+| `60_payroll_rota_rules.sql` | `rota_rules_*` effective dating, precedence (date > weekday > default), missing-config behaviour, and proof that `materialise_shift_instances` has zero payroll-rate responsibility (Stage 2D Checkpoint 3; decoupling proof added Payroll Checkpoint A) |
 | `70_atomic_shift_rpcs.sql` | `create_shift`/`revise_shift`/`deactivate_shift`/`reactivate_shift` atomicity, history preservation, security, audit (Stage 2D Checkpoint 3) |
+| `80_resort_lifecycle.sql` | `create_resort`/`deactivate_resort`/`reactivate_resort` atomicity, dependency-blocked deactivation, history preservation, security, audit (Stage 2D Checkpoint 4.1) |
+| `90_payroll_rate_foundations.sql` | `shift_base_pay_rules`/`driver_delivery_rates` effective dating, overlap prevention, historical-safe resolution, security, audit (Stage 2D Payroll Checkpoint A) |
 
-As of Stage 2D Checkpoint 3.1 this suite has **192 assertions**. That
+As of Stage 2D Payroll Checkpoint A this suite has **254 assertions**. That
 number will keep changing as the suite grows — don't chase a specific
 count; the point is that it stays genuinely comprehensive and, unlike its
 scratchpad predecessor, that it survives.

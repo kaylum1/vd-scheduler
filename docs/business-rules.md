@@ -290,3 +290,97 @@ a permanent regression test (see `mock/shiftConfiguration.test.ts` and
 Types + Recurring Shift Schedule two-layer UI), the atomic
 `create_shift`/`revise_shift`/`deactivate_shift`/`reactivate_shift` RPCs
 (Stage 2D Checkpoint 3).
+
+---
+
+## G. Payroll: the base/delivery formula and rate ownership
+
+**Decided:** Stage 2D Payroll Checkpoint A (architecture review + amendment),
+correcting the provisional ownership model Checkpoint 3 established.
+
+**A. Formula.** For a driver's worked shift:
+
+```
+if attendance = worked:
+  delivery_total   = SUM(driver's delivery rate x each delivery's multiplier)
+  worked_shift_pay = MAX(shift base guarantee, delivery_total)
+else:
+  worked_shift_pay = 0   -- no base guarantee; see E and the exceptions note below
+```
+
+**Never additive** — base and delivery earnings are never summed, only
+compared. Example: Dinner base CHF 30, driver rate CHF 12/delivery — 0-2
+completed deliveries pay CHF 30 (base wins); 3 deliveries pay CHF 36; 4 pay
+CHF 48 (delivery wins). `payroll_adjustments` (expense/bonus/other-addition/
+deduction) are applied after this per-driver result, entirely separate from
+the formula itself.
+
+**B. Shift base-pay ownership.** Belongs to the stable Shift
+(`shift_type_id`, scoped to `resort_id`), effective-dated, in
+`shift_base_pay_rules` (renamed from `payroll_rules` — see below). Different
+Shifts may have different guarantees (e.g. Dinner CHF 30, Lunch a different
+value).
+
+**C. Driver delivery-rate ownership.** Belongs to the **driver**, not the
+Shift, effective-dated, in `driver_delivery_rates`. All drivers happening to
+share CHF 12 today is operational coincidence, never a hardcoded system
+default — the schema has no permanent global rate anywhere.
+
+**D. Multiple drivers, one shift.** Each attending driver's `worked_shift_pay`
+is calculated **independently** — their own base comparison, their own
+delivery total, from their own rate. Never one combined shift payout, never a
+base guarantee shared/split between drivers.
+
+**E. Attendance gates the base guarantee.** Only `attendance.status = 'worked'`
+earns the Shift's base guarantee; `no_show`/`excused`/`cancelled` do not — an
+excused absence does not automatically earn base pay (if management wants to
+pay someone anyway despite not working, that is a `bonus`/`other_addition`
+adjustment, never a change to attendance semantics). **Missing attendance**
+(no row at all) will become a targeted "Attendance not recorded" payroll
+exception once payroll calculation exists — it blocks only that one
+driver+shift line, never the whole run, and never assumes worked or absent
+from the published rota. This **supersedes** the earlier documented
+published-rota-fallback-with-warning concept for payroll purposes specifically
+(that concept predates base pay depending on attendance; it was never
+implemented, so nothing is being changed in code by this decision, only the
+documented rule). **Completed deliveries recorded for a driver marked
+non-worked** are a data inconsistency, not a payroll decision either way — a
+future "Needs Attention" exception, never silently paid and never silently
+discarded.
+
+**F. Late-delivery double pay (design truth only — not implemented).** An
+Onfleet delivery whose **restaurant pickup** is scheduled at **21:20 or
+later**, in the resort's own operational local time, becomes *eligible* for a
+manager Normal/Double decision on the Dashboard (never automatic). The
+eventual state model is three-way — **PENDING / NORMAL / DOUBLE** — not a
+`multiplier` defaulting to `1`: an eligible late delivery with no manager
+decision must never silently behave as Normal; it blocks that delivery's
+contribution to payroll until resolved. A non-late delivery needs no manual
+confirmation at all — normal (×1) is implicit. Doubling applies **only** to
+that one delivery's own contribution to `delivery_total` — never the base
+guarantee, never the whole shift, never other deliveries.
+
+**G. Where financial snapshots live.** `shift_instances` is a purely
+operational schedule/staffing/high-value record — it owns **no** financial
+rate at all (see the Implemented note below). Both rates are resolved once,
+at actual payroll-calculation time, against the driver+shift's real date,
+inside the future `driver_shift_payroll` record (not built yet) — the
+authoritative financial snapshot and eventual finalisation boundary. Changing
+a rate afterward never alters an already-finalised `driver_shift_payroll` row;
+a finalised pay period's lines become immutable independently of each other
+(one unresolved exception never blocks every other correct line), and the
+run they belong to is only "Finalised" once every required line is.
+
+**Implemented (Stage 2D Payroll Checkpoint A):** `shift_base_pay_rules`
+(renamed from `payroll_rules`, `delivery_rate_chf` removed), `driver_delivery_rates`
+(new, mirrors the same effective-dated/no-overlap/manager-only/audited
+pattern), both resolved by nothing yet — no Payroll Rules UI, no repository
+writer, and no payroll calculation exist yet (Checkpoints B/E). `shift_instances`
+no longer has `base_pay_chf`/`delivery_rate_chf` at all (dropped, not just
+deprecated) and `materialise_shift_instances` has zero payroll-rate
+responsibility — no join to either rate table, no `missing_payroll_rule_count`
+(removed from its return shape entirely; `missing_rota_rule_count` is
+retained, since staffing remains a genuine materialisation/operational
+concern). `shift_templates.{base_pay_chf,delivery_rate_chf,required_drivers,
+is_premium}` remain exactly as deprecated/inert since Checkpoint 3 — untouched
+by this checkpoint, out of scope.

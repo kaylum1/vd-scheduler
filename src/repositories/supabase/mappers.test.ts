@@ -78,7 +78,7 @@ describe('mapDriverOnfleetMapping', () => {
 });
 
 describe('mapShiftInstance', () => {
-  it('narrows status/origin to the domain literal unions and preserves pay/premium fields', () => {
+  it('narrows status/origin to the domain literal unions and preserves premium/staffing fields -- no pay fields exist to map any more (Stage 2D Payroll Checkpoint A)', () => {
     const mapped = mapShiftInstance({
       id: 's1',
       resort_id: 'r1',
@@ -92,8 +92,6 @@ describe('mapShiftInstance', () => {
       start_time: '08:00',
       end_time: '12:00',
       required_drivers: 1,
-      base_pay_chf: 100,
-      delivery_rate_chf: 5,
       is_premium: true,
       status: 'active',
       origin: 'adhoc',
@@ -106,7 +104,8 @@ describe('mapShiftInstance', () => {
     expect(mapped.status).toBe('active');
     expect(mapped.origin).toBe('adhoc');
     expect(mapped.isPremium).toBe(true);
-    expect(mapped.basePayChf).toBe(100);
+    expect(mapped).not.toHaveProperty('basePayChf');
+    expect(mapped).not.toHaveProperty('deliveryRateChf');
   });
 
   it('falls back to `date` for weekStart in the (practically unreachable) case week_start is null', () => {
@@ -123,8 +122,6 @@ describe('mapShiftInstance', () => {
       start_time: '08:00',
       end_time: '12:00',
       required_drivers: 1,
-      base_pay_chf: 100,
-      delivery_rate_chf: 5,
       is_premium: false,
       status: 'active',
       origin: 'adhoc',
@@ -273,13 +270,12 @@ describe('Stage 2D Checkpoint 4: atomic shift RPC response mapping', () => {
 });
 
 describe('Stage 2C RPC response mapping', () => {
-  it('maps materialise_shift_instances(), including the Stage 2D Checkpoint 3 missing-rule counts', () => {
+  it('maps materialise_shift_instances(), including the Stage 2D Checkpoint 3 missing-rota-rule count -- no missing-payroll-rule count exists any more (Stage 2D Payroll Checkpoint A)', () => {
     const mapped = mapMaterialiseShiftsResult({
       created_count: 5,
       skipped_existing_count: 2,
       from_date: '2024-01-01',
       to_date: '2024-02-29',
-      missing_payroll_rule_count: 1,
       missing_rota_rule_count: 3,
     });
     expect(mapped).toEqual({
@@ -287,7 +283,6 @@ describe('Stage 2C RPC response mapping', () => {
       skippedExistingCount: 2,
       fromDate: '2024-01-01',
       toDate: '2024-02-29',
-      missingPayrollRuleCount: 1,
       missingRotaRuleCount: 3,
     });
   });

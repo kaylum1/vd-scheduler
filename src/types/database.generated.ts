@@ -329,6 +329,50 @@ export type Database = {
           },
         ]
       }
+      driver_delivery_rates: {
+        Row: {
+          created_at: string
+          driver_id: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          is_active: boolean
+          rate_chf: number
+          resort_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          driver_id: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          rate_chf: number
+          resort_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          driver_id?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          rate_chf?: number
+          resort_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_delivery_rates_driver_resort_fk"
+            columns: ["driver_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "drivers"
+            referencedColumns: ["id", "resort_id"]
+          },
+        ]
+      }
       driver_onfleet_mappings: {
         Row: {
           created_at: string
@@ -507,53 +551,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "app_users"
             referencedColumns: ["id"]
-          },
-        ]
-      }
-      payroll_rules: {
-        Row: {
-          base_pay_chf: number
-          created_at: string
-          delivery_rate_chf: number
-          effective_from: string
-          effective_to: string | null
-          id: string
-          is_active: boolean
-          resort_id: string
-          shift_type_id: string
-          updated_at: string
-        }
-        Insert: {
-          base_pay_chf: number
-          created_at?: string
-          delivery_rate_chf: number
-          effective_from: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          resort_id: string
-          shift_type_id: string
-          updated_at?: string
-        }
-        Update: {
-          base_pay_chf?: number
-          created_at?: string
-          delivery_rate_chf?: number
-          effective_from?: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          resort_id?: string
-          shift_type_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "payroll_rules_shift_type_resort_fk"
-            columns: ["shift_type_id", "resort_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id", "resort_id"]
           },
         ]
       }
@@ -858,15 +855,57 @@ export type Database = {
           },
         ]
       }
+      shift_base_pay_rules: {
+        Row: {
+          base_pay_chf: number
+          created_at: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          is_active: boolean
+          resort_id: string
+          shift_type_id: string
+          updated_at: string
+        }
+        Insert: {
+          base_pay_chf: number
+          created_at?: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          resort_id: string
+          shift_type_id: string
+          updated_at?: string
+        }
+        Update: {
+          base_pay_chf?: number
+          created_at?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          resort_id?: string
+          shift_type_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shift_base_pay_rules_shift_type_resort_fk"
+            columns: ["shift_type_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "shift_types"
+            referencedColumns: ["id", "resort_id"]
+          },
+        ]
+      }
       shift_instances: {
         Row: {
-          base_pay_chf: number | null
           cancelled_at: string | null
           cancelled_by: string | null
           cancelled_reason: string | null
           created_at: string
           date: string
-          delivery_rate_chf: number | null
           end_time: string
           id: string
           is_premium: boolean | null
@@ -884,13 +923,11 @@ export type Database = {
           week_start: string | null
         }
         Insert: {
-          base_pay_chf?: number | null
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
           created_at?: string
           date: string
-          delivery_rate_chf?: number | null
           end_time: string
           id?: string
           is_premium?: boolean | null
@@ -908,13 +945,11 @@ export type Database = {
           week_start?: string | null
         }
         Update: {
-          base_pay_chf?: number | null
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
           created_at?: string
           date?: string
-          delivery_rate_chf?: number | null
           end_time?: string
           id?: string
           is_premium?: boolean | null
@@ -1314,7 +1349,6 @@ export type Database = {
         Returns: {
           created_count: number
           from_date: string
-          missing_payroll_rule_count: number
           missing_rota_rule_count: number
           skipped_existing_count: number
           to_date: string

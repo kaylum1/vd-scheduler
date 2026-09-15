@@ -192,15 +192,18 @@ begin
   perform confirm_availability_week(current_setting('dbtest.driver_a_id')::uuid, current_setting('dbtest.avail_week_start')::date);
 end $$;
 
--- pay/staffing/high-value changes do not reopen availability.
+-- staffing/high-value changes do not reopen availability. (Pay is no
+-- longer a shift_instances column at all -- Stage 2D Payroll Checkpoint A --
+-- so it can no longer be part of this scenario; staffing/high-value alone
+-- still fully exercises the invariant.)
 do $$
 declare
   v_id uuid;
 begin
   select id into v_id from shift_instances where shift_type_id = current_setting('dbtest.avail_shift_type')::uuid and date = '2027-03-01';
-  update shift_instances set required_drivers = 5, base_pay_chf = 999, delivery_rate_chf = 50, is_premium = true where id = v_id;
+  update shift_instances set required_drivers = 5, is_premium = true where id = v_id;
 
-  perform pg_temp.expect_true('stale confirmation: pay/staffing/high-value changes do NOT reopen the week',
+  perform pg_temp.expect_true('stale confirmation: staffing/high-value changes do NOT reopen the week',
     (select submitted_at is not null from availability_submissions where driver_id = current_setting('dbtest.driver_a_id')::uuid and week_start = current_setting('dbtest.avail_week_start')::date));
 end $$;
 

@@ -79,10 +79,7 @@ export function ShiftSetupPanel({ resortId, resortName }: { resortId: string; re
         `${result.createdCount} shift${result.createdCount === 1 ? '' : 's'} created.`,
         `${result.skippedExistingCount} already existed.`,
       ];
-      const hasWarning = result.missingPayrollRuleCount > 0 || result.missingRotaRuleCount > 0;
-      if (result.missingPayrollRuleCount > 0) {
-        parts.push(`${result.missingPayrollRuleCount} shift${result.missingPayrollRuleCount === 1 ? ' has' : 's have'} no Payroll Rule configured.`);
-      }
+      const hasWarning = result.missingRotaRuleCount > 0;
       if (result.missingRotaRuleCount > 0) {
         parts.push(`${result.missingRotaRuleCount} shift${result.missingRotaRuleCount === 1 ? ' has' : 's have'} no Rota Rule configured.`);
       }
@@ -114,9 +111,11 @@ export function ShiftSetupPanel({ resortId, resortName }: { resortId: string; re
 
       {materialiseNotice && (
         <div style={{ padding: '12px 18px 0' }}>
-          {/* Missing Payroll/Rota Rule counts are informational "Needs
-              Attention" signals, never a materialisation failure -- amber,
-              not red, and dismissible like any other success notice. */}
+          {/* Missing Rota Rule count is an informational "Needs Attention"
+              signal, never a materialisation failure -- amber, not red, and
+              dismissible like any other success notice. Shift generation has
+              no payroll-rate awareness at all (Stage 2D Payroll Checkpoint
+              A) -- missing-rate configuration is surfaced by Payroll itself. */}
           <InlineNotice tone={materialiseNotice.hasWarning ? 'warning' : 'success'} onDismiss={() => setMaterialiseNotice(null)}>
             {materialiseNotice.text}
           </InlineNotice>

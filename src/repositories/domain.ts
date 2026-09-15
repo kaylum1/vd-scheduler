@@ -137,16 +137,20 @@ export interface ShiftScheduleRecord {
 }
 
 /**
- * Manager-side, full-fidelity shift instance (includes pay/premium/
- * headcount). Never expose this shape to a driver session — that's what
- * DriverVisibleShift is for.
+ * Manager-side, full-fidelity shift instance -- a purely operational
+ * schedule/staffing/high-value record. Never expose this shape to a driver
+ * session -- that's what DriverVisibleShift is for.
  *
- * requiredDrivers/basePayChf/deliveryRateChf/isPremium are nullable as of
- * Stage 2D Checkpoint 3: NULL means "not configured" (no applicable
- * payroll_rules/rota_rules_* row at materialisation time) — a distinct
- * "Needs Attention" state, never coalesced to 0/false. See
- * coverageTone/coverageLabel in components/ui/StatusPill.tsx and
+ * requiredDrivers/isPremium are nullable as of Stage 2D Checkpoint 3: NULL
+ * means "not configured" (no applicable rota_rules_* row at materialisation
+ * time) — a distinct "Needs Attention" state, never coalesced to 0/false.
+ * See coverageTone/coverageLabel in components/ui/StatusPill.tsx and
  * docs/business-rules.md.
+ *
+ * No basePayChf/deliveryRateChf here (removed Stage 2D Payroll Checkpoint
+ * A): a shift instance never snapshots pay. Base pay and driver delivery
+ * rate are resolved later, at actual payroll-calculation time, against
+ * shift_base_pay_rules/driver_delivery_rates -- see docs/business-rules.md.
  */
 export interface ShiftInstanceRecord {
   id: string;
@@ -161,8 +165,6 @@ export interface ShiftInstanceRecord {
   startTime: string;
   endTime: string;
   requiredDrivers: number | null;
-  basePayChf: number | null;
-  deliveryRateChf: number | null;
   isPremium: boolean | null;
   status: 'active' | 'cancelled';
   origin: 'template' | 'adhoc';
@@ -250,17 +252,20 @@ export interface ReopenWeekOutcome {
 // ---------------------------------------------------------------------
 
 /**
- * Maps 1:1 onto materialise_shift_instances()'s row shape. The two missing-
- * rule counts (Stage 2D Checkpoint 3) count shifts materialised over the
- * requested range with no applicable payroll_rules/rota_rules_* row --
- * never a failure, always a "Needs Attention" signal.
+ * Maps 1:1 onto materialise_shift_instances()'s row shape. missingRotaRuleCount
+ * (Stage 2D Checkpoint 3) counts shifts materialised over the requested range
+ * with no applicable rota_rules_* row -- never a failure, always a "Needs
+ * Attention" signal. There is no missingPayrollRuleCount: as of Stage 2D
+ * Payroll Checkpoint A, materialisation has zero payroll-rate responsibility
+ * -- pay is resolved later, at actual payroll-calculation time, against
+ * shift_base_pay_rules/driver_delivery_rates, never here. Missing-rate
+ * configuration is Payroll's own concern to surface, not shift generation's.
  */
 export interface MaterialiseShiftsResult {
   createdCount: number;
   skippedExistingCount: number;
   fromDate: string;
   toDate: string;
-  missingPayrollRuleCount: number;
   missingRotaRuleCount: number;
 }
 

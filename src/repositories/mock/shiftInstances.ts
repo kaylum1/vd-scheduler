@@ -31,8 +31,6 @@ export function generateMockShiftInstancesForWeek(resortId: string, weekStart: s
         startTime: template.startTime,
         endTime: template.endTime,
         requiredDrivers: template.requiredDrivers,
-        basePayChf: template.basePayChf,
-        deliveryRateChf: template.deliveryRateChf,
         isPremium: template.isPremium,
         status: 'active',
         origin: 'template',

@@ -14,8 +14,8 @@ begin
     array[0]::smallint[], '2027-05-03'::date, null -- 2027-05-03 is a Monday
   );
   perform set_config('dbtest.sec_shift_type', v_shift_type_id::text, false);
-  insert into payroll_rules (resort_id, shift_type_id, base_pay_chf, delivery_rate_chf, effective_from)
-  values (v_resort_id, v_shift_type_id, 100, 5, '2027-05-01');
+  insert into shift_base_pay_rules (resort_id, shift_type_id, base_pay_chf, effective_from)
+  values (v_resort_id, v_shift_type_id, 100, '2027-05-01');
   insert into rota_rules_default (resort_id, shift_type_id, required_drivers, is_premium, effective_from)
   values (v_resort_id, v_shift_type_id, 1, true, '2027-05-01');
   perform materialise_shift_instances(v_resort_id, '2027-05-03'::date, '2027-05-03'::date);
@@ -30,7 +30,8 @@ select pg_temp.expect_error('anon: cannot select drivers (42501)', 'select count
 select pg_temp.expect_error('anon: cannot select shift_instances (42501)', 'select count(*) from shift_instances', '42501');
 select pg_temp.expect_error('anon: cannot select resorts (42501)', 'select count(*) from resorts', '42501');
 select pg_temp.expect_error('anon: cannot select availability (42501)', 'select count(*) from availability', '42501');
-select pg_temp.expect_error('anon: cannot select payroll_rules (42501)', 'select count(*) from payroll_rules', '42501');
+select pg_temp.expect_error('anon: cannot select shift_base_pay_rules (42501)', 'select count(*) from shift_base_pay_rules', '42501');
+select pg_temp.expect_error('anon: cannot select driver_delivery_rates (42501)', 'select count(*) from driver_delivery_rates', '42501');
 select pg_temp.expect_error('anon: cannot select audit_log (42501)', 'select count(*) from audit_log', '42501');
 select pg_temp.expect_error('anon: cannot call a manager RPC (42501)',
   format('select create_shift(%L::uuid, %L, %L::time, %L::time, array[0]::smallint[], null, null)',
@@ -52,8 +53,10 @@ select pg_temp.expect_true('driver: no rows from shift_instances (base table; dr
   (select count(*) from shift_instances) = 0);
 select pg_temp.expect_true('driver: no rows from shift_templates',
   (select count(*) from shift_templates) = 0);
-select pg_temp.expect_true('driver: no rows from payroll_rules',
-  (select count(*) from payroll_rules) = 0);
+select pg_temp.expect_true('driver: no rows from shift_base_pay_rules',
+  (select count(*) from shift_base_pay_rules) = 0);
+select pg_temp.expect_true('driver: no rows from driver_delivery_rates',
+  (select count(*) from driver_delivery_rates) = 0);
 select pg_temp.expect_true('driver: no rows from rota_rules_default',
   (select count(*) from rota_rules_default) = 0);
 select pg_temp.expect_true('driver: no rows from rota_rules_weekday',
@@ -85,11 +88,15 @@ select pg_temp.expect_error('driver: cannot call set_driver_onfleet_mapping (425
 -- driver_visible_shifts never exposes premium/pay/headcount, even though
 -- the underlying materialised instance has them configured (is_premium in
 -- particular, per the product rule that drivers must never see it).
-select pg_temp.expect_true('driver_visible_shifts: never exposes is_premium/pay/required_drivers columns (structural)',
+-- base_pay_chf/delivery_rate_chf are no longer even columns on
+-- shift_instances (Stage 2D Payroll Checkpoint A) -- see
+-- 60_payroll_rota_rules.sql for that structural proof directly; checking
+-- for their absence from this view too would be vacuous.
+select pg_temp.expect_true('driver_visible_shifts: never exposes is_premium/required_drivers columns (structural)',
   not exists (
     select 1 from information_schema.columns
     where table_schema = 'public' and table_name = 'driver_visible_shifts'
-      and column_name in ('is_premium', 'base_pay_chf', 'delivery_rate_chf', 'required_drivers', 'template_id', 'origin')
+      and column_name in ('is_premium', 'required_drivers', 'template_id', 'origin')
   ));
 select pg_temp.expect_true('driver_visible_shifts: driver_a sees the shift materialised in their own resort',
   exists (select 1 from driver_visible_shifts where shift_type_id = current_setting('dbtest.sec_shift_type')::uuid));
