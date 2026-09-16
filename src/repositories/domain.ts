@@ -62,12 +62,20 @@ export interface ShiftTypeRecord {
 }
 
 /**
- * requiredDrivers/basePayChf/deliveryRateChf/isPremium are DEPRECATED
- * (Stage 2D Checkpoint 3): staffing now belongs to rota_rules_*, pay to
- * payroll_rules. Nullable here purely because the DB columns are nullable
- * -- the current Shift Setup form (Checkpoint 4 will remove this) still
- * writes real values to them, but materialise_shift_instances no longer
- * reads them off this table at all.
+ * requiredDrivers is authoritative again (Stage 2D staffing simplification)
+ * -- mandatory (>= 1) on every row written through the atomic RPCs.
+ * basePayChf/deliveryRateChf/isPremium remain DEPRECATED/inert: pay belongs
+ * to shift_base_pay_rules/driver_delivery_rates, and high-value/fairness is
+ * not part of the V1 product model. Nullable here purely because the DB
+ * columns are nullable.
+ *
+ * INTERNAL AS OF CHECKPOINT 4: this is the raw per-weekday database row --
+ * `listShiftTemplates` still returns it (used internally to assemble
+ * ShiftRecord, and kept for any future internal/migration tooling), but no
+ * manager-facing UI component should consume it directly any more. The
+ * Shift Setup UI works with `ShiftRecord` instead, which collapses a shift
+ * type's active (or last-known) templates into the single "one Shift, one
+ * time, several weekdays" shape managers actually think in.
  */
 export interface ShiftTemplateRecord {
   id: string;
@@ -84,19 +92,72 @@ export interface ShiftTemplateRecord {
   effectiveFrom: string;
   effectiveTo: string | null;
   isActive: boolean;
+  /**
+   * Used by assembleShift to identify "the batch of rows one atomic RPC
+   * call touched together" for an inactive shift type, when more than one
+   * retirement event happens to share the same effective_to calendar date
+   * (e.g. a weekday removed by revise_shift earlier the same day the shift
+   * is later deactivated) -- effective_to alone can't distinguish those
+   * two events, but they get different updated_at values since each is a
+   * separate transaction. See assembleShift.ts.
+   */
+  updatedAt: string;
 }
 
 /**
- * Manager-side, full-fidelity shift instance (includes pay/premium/
- * headcount). Never expose this shape to a driver session — that's what
- * DriverVisibleShift is for.
+ * The manager-facing "Shift" (Stage 2D Checkpoint 4) -- one stable
+ * shift_type collapsed together with its current (or, once inactive, its
+ * last-known) set of weekday schedule rows into the single shape the
+ * simplified Shift Setup UI renders and edits. Internal concepts (the
+ * stable `key`, per-weekday template rows, the Monday=0..Sunday=6 weekday
+ * integer are still used to build this, but never surfaced beyond it.
  *
- * requiredDrivers/basePayChf/deliveryRateChf/isPremium are nullable as of
- * Stage 2D Checkpoint 3: NULL means "not configured" (no applicable
- * payroll_rules/rota_rules_* row at materialisation time) — a distinct
- * "Needs Attention" state, never coalesced to 0/false. See
- * coverageTone/coverageLabel in components/ui/StatusPill.tsx and
- * docs/business-rules.md.
+ * `schedule` is null when the underlying rows are inconsistent (different
+ * start/end times and/or different effective periods across the relevant
+ * weekdays) -- a legacy data state Checkpoint 4's "one shift, one time"
+ * rule doesn't allow going forward, but which the UI must never silently
+ * flatten by guessing a time. See `assembleShifts` in
+ * `repositories/assembleShift.ts` and docs/business-rules.md.
+ */
+export interface ShiftRecord {
+  shiftTypeId: string;
+  resortId: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+  schedule: ShiftScheduleRecord | null;
+  /** Populated only when schedule is null, to drive a useful review-required message. Monday=0..Sunday=6, ascending. */
+  inconsistentWeekdays?: number[];
+}
+
+export interface ShiftScheduleRecord {
+  startTime: string;
+  endTime: string;
+  /** Monday=0..Sunday=6, ascending, deduplicated. */
+  weekdays: number[];
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  /** Authoritative staffing requirement for this Shift (Stage 2D staffing simplification). Always >= 1 -- mandatory at Shift-creation time, never null on an assembled schedule. */
+  requiredDrivers: number;
+}
+
+/**
+ * Manager-side, full-fidelity shift instance -- a purely operational
+ * schedule/staffing record. Never expose this shape to a driver session --
+ * that's what DriverVisibleShift is for.
+ *
+ * requiredDrivers is mandatory as of the Stage 2D staffing simplification:
+ * it is snapshotted directly from the governing Shift's required_drivers at
+ * materialisation time, and can never be null (required_drivers has been
+ * mandatory on shift_templates since Shift-creation time). isPremium is an
+ * inert legacy column -- no longer resolved or populated; high-value/
+ * fairness is not part of the V1 product model. See coverageTone/
+ * coverageLabel in components/ui/StatusPill.tsx and docs/business-rules.md.
+ *
+ * No basePayChf/deliveryRateChf here (removed Stage 2D Payroll Checkpoint
+ * A): a shift instance never snapshots pay. Base pay and driver delivery
+ * rate are resolved later, at actual payroll-calculation time, against
+ * shift_base_pay_rules/driver_delivery_rates -- see docs/business-rules.md.
  */
 export interface ShiftInstanceRecord {
   id: string;
@@ -110,9 +171,7 @@ export interface ShiftInstanceRecord {
   sortOrder: number;
   startTime: string;
   endTime: string;
-  requiredDrivers: number | null;
-  basePayChf: number | null;
-  deliveryRateChf: number | null;
+  requiredDrivers: number;
   isPremium: boolean | null;
   status: 'active' | 'cancelled';
   origin: 'template' | 'adhoc';
@@ -194,24 +253,85 @@ export interface ReopenWeekOutcome {
   reopenedReason: string | null;
 }
 
+/**
+ * Stage 3: a direct, read-only projection of the driver's own
+ * availability_submissions row for one week (or null if no row exists yet
+ * -- the driver has never confirmed this week). Distinct from
+ * WeekAvailabilityStatus: that RPC always recomputes pure answer
+ * *completeness* fresh from the current active shift set and never trusts
+ * this table, whereas the driver-facing UI also needs the actual
+ * confirmation state itself (has the driver clicked "Confirm", and if a
+ * confirmation was reopened, was it the driver's own choice or an
+ * automatic stale-invalidation?) -- that state lives only here.
+ * `reopenedReason` is one of 'driver_reopened' (the driver chose to edit
+ * a confirmed week) or 'shift_added'/'shift_reinstated'/'shift_time_changed'
+ * (an automatic, service-driven staleness event -- see
+ * docs/business-rules.md). A row with `submittedAt` non-null is currently
+ * confirmed and valid -- the DB trigger that would make it stale already
+ * cleared `submittedAt` the moment a staleness-triggering change happened,
+ * so this field is never read as "confirmed as of some past moment risk of
+ * being outdated".
+ */
+export interface AvailabilitySubmissionRecord {
+  driverId: string;
+  resortId: string;
+  weekStart: string;
+  submittedAt: string | null;
+  reopenedAt: string | null;
+  reopenedReason: string | null;
+}
+
+/**
+ * Manager-facing weekly submission state for one driver (Stage 3). Derived
+ * client-side from the same primitives the driver-facing page uses
+ * (answered/total shift counts, the driver's own availability_submissions
+ * row, and the resort/week's publication state) -- never a separately
+ * stored status column. See docs/business-rules.md for the exact mapping.
+ */
+export type DriverWeekAvailabilityState = 'not_started' | 'in_progress' | 'confirmed' | 'needs_reconfirmation' | 'locked';
+
+/** One row per active driver at a resort, for one week -- what the manager's availability list renders. */
+export interface AvailabilitySubmissionSummary {
+  driverId: string;
+  driverFullName: string;
+  totalShifts: number;
+  answeredCount: number;
+  state: DriverWeekAvailabilityState;
+}
+
+/**
+ * One driver's answer (or lack of one) for one active shift_instance that
+ * week -- manager-only (drivers use `listAvailability` instead, scoped to
+ * their own session). `status: null` means the driver has not answered
+ * that shift yet ("Not Submitted") -- never a stored third status.
+ */
+export interface DriverShiftAvailability {
+  shiftInstanceId: string;
+  date: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  status: AvailabilityStatus | null;
+}
+
 // ---------------------------------------------------------------------
 // Stage 2C: shift materialisation + template refresh/cancellation.
 // Manager-only. Maps 1:1 onto the corresponding RPC row shapes.
 // ---------------------------------------------------------------------
 
 /**
- * Maps 1:1 onto materialise_shift_instances()'s row shape. The two missing-
- * rule counts (Stage 2D Checkpoint 3) count shifts materialised over the
- * requested range with no applicable payroll_rules/rota_rules_* row --
- * never a failure, always a "Needs Attention" signal.
+ * Maps 1:1 onto materialise_shift_instances()'s row shape. There is no
+ * missing-staffing or missing-payroll count of any kind: required_drivers
+ * is mandatory at Shift-creation time (Stage 2D staffing simplification),
+ * so a materialised instance can never be missing it, and pay is resolved
+ * later, at actual payroll-calculation time, against shift_base_pay_rules/
+ * driver_delivery_rates, never here (Stage 2D Payroll Checkpoint A).
  */
 export interface MaterialiseShiftsResult {
   createdCount: number;
   skippedExistingCount: number;
   fromDate: string;
   toDate: string;
-  missingPayrollRuleCount: number;
-  missingRotaRuleCount: number;
 }
 
 /** One field that would change if a template refresh were applied. */
@@ -221,11 +341,13 @@ export interface TemplateRefreshFieldChange {
 }
 
 /**
- * Maps 1:1 onto one row of preview_template_refresh(). Schedule fields only
- * as of Stage 2D Checkpoint 3 -- required_drivers/pay/is_premium are no
- * longer schedule-template concerns (they belong to payroll_rules/
- * rota_rules_*), so there is no more current/new-required-drivers or
- * over-assignment projection here at all.
+ * Maps 1:1 onto one row of preview_template_refresh(). Covers schedule
+ * fields (name/sort_order/start_time/end_time) plus required_drivers
+ * (Stage 2D staffing simplification) -- surfaced generically through
+ * `changedFields`, not a dedicated output column. Pay/is_premium are still
+ * never schedule-refresh concerns (they belong to shift_base_pay_rules/
+ * driver_delivery_rates, or are inert), so there is no over-assignment
+ * projection here.
  */
 export interface TemplateRefreshPreviewRow {
   shiftInstanceId: string;
@@ -270,4 +392,33 @@ export interface TemplateCancellationPreviewRow {
 export interface ApplyTemplateCancellationResult {
   cancelledCount: number;
   cancelledShiftInstanceIds: string[];
+}
+
+// ---------------------------------------------------------------------
+// Stage 2D Payroll Checkpoint B: rate configuration. See
+// docs/business-rules.md section G for the full formula/ownership model.
+// Both are manager-only, effective-dated, and NEVER resolved onto
+// shift_instances -- see repositories/types.ts's PayrollRulesRepository
+// doc comment for how a caller is expected to derive Current/Scheduled/
+// History from the flat list each `list*` method returns.
+// ---------------------------------------------------------------------
+
+/** Maps 1:1 onto a shift_base_pay_rules row. `effectiveTo: null` = open-ended (still the current or most-recently-set version for this Shift). */
+export interface ShiftBasePayRuleRecord {
+  id: string;
+  resortId: string;
+  shiftTypeId: string;
+  basePayChf: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+}
+
+/** Maps 1:1 onto a driver_delivery_rates row. `effectiveTo: null` = open-ended. Manager-only -- a driver must never be able to fetch their own rate through any driver-facing path. */
+export interface DriverDeliveryRateRecord {
+  id: string;
+  resortId: string;
+  driverId: string;
+  rateChf: number;
+  effectiveFrom: string;
+  effectiveTo: string | null;
 }

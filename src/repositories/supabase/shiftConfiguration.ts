@@ -1,11 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../types/database.generated';
-import type { ShiftConfigurationRepository } from '../types';
+import type { ShiftConfigurationRepository, ShiftScheduleInput } from '../types';
+import { assembleShifts } from '../assembleShift';
 import type {
   ApplyTemplateCancellationResult,
   ApplyTemplateRefreshResult,
   MaterialiseShiftsResult,
   ShiftInstanceRecord,
+  ShiftRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
   TemplateCancellationPreviewRow,
@@ -15,8 +17,10 @@ import { unwrap } from '../errors';
 import {
   mapApplyTemplateCancellationResult,
   mapApplyTemplateRefreshResult,
+  mapCreateShiftResult,
   mapMaterialiseShiftsResult,
   mapShiftInstance,
+  mapShiftMutationResult,
   mapShiftTemplate,
   mapShiftType,
   mapTemplateCancellationPreviewRow,
@@ -26,7 +30,11 @@ import {
 export class SupabaseShiftConfigurationRepository implements ShiftConfigurationRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
 
-  async listShiftTypes(resortId: string): Promise<ShiftTypeRecord[]> {
+  // Internal detail methods (not part of the public ShiftConfigurationRepository
+  // contract as of Stage 2D Checkpoint 4 -- Shift Setup and every other
+  // manager-facing consumer works through listShifts/createShift/reviseShift/
+  // deactivateShift/reactivateShift instead) used only to assemble listShifts.
+  private async listShiftTypes(resortId: string): Promise<ShiftTypeRecord[]> {
     const rows = await unwrap(
       'shiftConfiguration.listShiftTypes',
       this.client.from('shift_types').select('*').eq('resort_id', resortId).order('sort_order', { ascending: true })
@@ -34,7 +42,7 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
     return rows.map(mapShiftType);
   }
 
-  async listShiftTemplates(shiftTypeId: string): Promise<ShiftTemplateRecord[]> {
+  private async listShiftTemplates(shiftTypeId: string): Promise<ShiftTemplateRecord[]> {
     const rows = await unwrap(
       'shiftConfiguration.listShiftTemplates',
       this.client
@@ -45,6 +53,14 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
         .order('effective_from', { ascending: true })
     );
     return rows.map(mapShiftTemplate);
+  }
+
+  async listShifts(resortId: string): Promise<ShiftRecord[]> {
+    const shiftTypes = await this.listShiftTypes(resortId);
+    const templatesByType = new Map<string, ShiftTemplateRecord[]>(
+      await Promise.all(shiftTypes.map(async (t): Promise<[string, ShiftTemplateRecord[]]> => [t.id, await this.listShiftTemplates(t.id)]))
+    );
+    return assembleShifts(shiftTypes, templatesByType);
   }
 
   async listShiftInstances(params: { resortId: string; weekStart: string }): Promise<ShiftInstanceRecord[]> {
@@ -61,91 +77,64 @@ export class SupabaseShiftConfigurationRepository implements ShiftConfigurationR
     return rows.map(mapShiftInstance);
   }
 
-  async createShiftType(input: {
-    resortId: string;
-    key: string;
-    name: string;
-    sortOrder: number;
-  }): Promise<ShiftTypeRecord> {
+  async createShift(resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }> {
     const rows = await unwrap(
-      'shiftConfiguration.createShiftType',
-      this.client
-        .from('shift_types')
-        .insert({ resort_id: input.resortId, key: input.key, name: input.name, sort_order: input.sortOrder })
-        .select('*')
+      'shiftConfiguration.createShift',
+      this.client.rpc('create_shift', {
+        p_resort_id: resortId,
+        p_name: input.name,
+        p_start_time: input.startTime,
+        p_end_time: input.endTime,
+        p_weekdays: input.weekdays,
+        p_required_drivers: input.requiredDrivers,
+        p_effective_from: input.effectiveFrom,
+        p_effective_to: input.effectiveTo,
+      })
     );
-    return mapShiftType(rows[0]);
+    return mapCreateShiftResult(rows[0]);
   }
 
-  async renameShiftType(shiftTypeId: string, name: string): Promise<ShiftTypeRecord> {
+  async reviseShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }> {
     const rows = await unwrap(
-      'shiftConfiguration.renameShiftType',
-      this.client.from('shift_types').update({ name }).eq('id', shiftTypeId).select('*')
+      'shiftConfiguration.reviseShift',
+      this.client.rpc('revise_shift', {
+        p_shift_type_id: shiftTypeId,
+        p_resort_id: resortId,
+        p_name: input.name,
+        p_start_time: input.startTime,
+        p_end_time: input.endTime,
+        p_weekdays: input.weekdays,
+        p_required_drivers: input.requiredDrivers,
+        p_effective_from: input.effectiveFrom,
+        p_effective_to: input.effectiveTo,
+      })
     );
-    return mapShiftType(rows[0]);
+    return mapShiftMutationResult(rows[0]);
   }
 
-  async reorderShiftType(shiftTypeId: string, sortOrder: number): Promise<ShiftTypeRecord> {
+  async deactivateShift(shiftTypeId: string, resortId: string, effectiveTo?: string): Promise<{ shiftTypeId: string }> {
     const rows = await unwrap(
-      'shiftConfiguration.reorderShiftType',
-      this.client.from('shift_types').update({ sort_order: sortOrder }).eq('id', shiftTypeId).select('*')
+      'shiftConfiguration.deactivateShift',
+      this.client.rpc('deactivate_shift', { p_shift_type_id: shiftTypeId, p_resort_id: resortId, p_effective_to: effectiveTo })
     );
-    return mapShiftType(rows[0]);
+    return mapShiftMutationResult(rows[0]);
   }
 
-  async deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord> {
+  async reactivateShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }> {
     const rows = await unwrap(
-      'shiftConfiguration.deactivateShiftType',
-      this.client.from('shift_types').update({ is_active: false }).eq('id', shiftTypeId).select('*')
+      'shiftConfiguration.reactivateShift',
+      this.client.rpc('reactivate_shift', {
+        p_shift_type_id: shiftTypeId,
+        p_resort_id: resortId,
+        p_start_time: input.startTime,
+        p_end_time: input.endTime,
+        p_weekdays: input.weekdays,
+        p_required_drivers: input.requiredDrivers,
+        p_effective_from: input.effectiveFrom,
+        p_effective_to: input.effectiveTo,
+      })
     );
-    return mapShiftType(rows[0]);
-  }
-
-  async createShiftTemplateVersion(input: {
-    shiftTypeId: string;
-    resortId: string;
-    weekday: number;
-    startTime: string;
-    endTime: string;
-    requiredDrivers: number;
-    basePayChf: number;
-    deliveryRateChf: number;
-    isPremium: boolean;
-    effectiveFrom: string;
-    effectiveTo?: string;
-  }): Promise<ShiftTemplateRecord> {
-    const rows = await unwrap(
-      'shiftConfiguration.createShiftTemplateVersion',
-      this.client
-        .from('shift_templates')
-        .insert({
-          shift_type_id: input.shiftTypeId,
-          resort_id: input.resortId,
-          weekday: input.weekday,
-          start_time: input.startTime,
-          end_time: input.endTime,
-          required_drivers: input.requiredDrivers,
-          base_pay_chf: input.basePayChf,
-          delivery_rate_chf: input.deliveryRateChf,
-          is_premium: input.isPremium,
-          effective_from: input.effectiveFrom,
-          ...(input.effectiveTo ? { effective_to: input.effectiveTo } : {}),
-        })
-        .select('*')
-    );
-    return mapShiftTemplate(rows[0]);
-  }
-
-  async deactivateShiftTemplate(templateId: string, effectiveTo: string): Promise<ShiftTemplateRecord> {
-    const rows = await unwrap(
-      'shiftConfiguration.deactivateShiftTemplate',
-      this.client
-        .from('shift_templates')
-        .update({ effective_to: effectiveTo, is_active: false })
-        .eq('id', templateId)
-        .select('*')
-    );
-    return mapShiftTemplate(rows[0]);
+    return mapShiftMutationResult(rows[0]);
   }
 
   async materialiseShifts(resortId: string, fromDate?: string, toDate?: string): Promise<MaterialiseShiftsResult> {

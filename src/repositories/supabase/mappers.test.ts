@@ -3,7 +3,9 @@ import {
   mapApplyTemplateCancellationResult,
   mapApplyTemplateRefreshResult,
   mapAvailability,
+  mapAvailabilitySubmission,
   mapConfirmWeekOutcome,
+  mapCreateShiftResult,
   mapDriver,
   mapDriverOnfleetMapping,
   mapDriverVisibleAssignment,
@@ -12,6 +14,7 @@ import {
   mapReopenWeekOutcome,
   mapResort,
   mapShiftInstance,
+  mapShiftMutationResult,
   mapSupportedLanguage,
   mapTemplateCancellationPreviewRow,
   mapTemplateRefreshPreviewRow,
@@ -76,7 +79,7 @@ describe('mapDriverOnfleetMapping', () => {
 });
 
 describe('mapShiftInstance', () => {
-  it('narrows status/origin to the domain literal unions and preserves pay/premium fields', () => {
+  it('narrows status/origin to the domain literal unions and preserves premium/staffing fields -- no pay fields exist to map any more (Stage 2D Payroll Checkpoint A)', () => {
     const mapped = mapShiftInstance({
       id: 's1',
       resort_id: 'r1',
@@ -90,8 +93,6 @@ describe('mapShiftInstance', () => {
       start_time: '08:00',
       end_time: '12:00',
       required_drivers: 1,
-      base_pay_chf: 100,
-      delivery_rate_chf: 5,
       is_premium: true,
       status: 'active',
       origin: 'adhoc',
@@ -104,7 +105,8 @@ describe('mapShiftInstance', () => {
     expect(mapped.status).toBe('active');
     expect(mapped.origin).toBe('adhoc');
     expect(mapped.isPremium).toBe(true);
-    expect(mapped.basePayChf).toBe(100);
+    expect(mapped).not.toHaveProperty('basePayChf');
+    expect(mapped).not.toHaveProperty('deliveryRateChf');
   });
 
   it('falls back to `date` for weekStart in the (practically unreachable) case week_start is null', () => {
@@ -121,8 +123,6 @@ describe('mapShiftInstance', () => {
       start_time: '08:00',
       end_time: '12:00',
       required_drivers: 1,
-      base_pay_chf: 100,
-      delivery_rate_chf: 5,
       is_premium: false,
       status: 'active',
       origin: 'adhoc',
@@ -210,6 +210,31 @@ describe('mapAvailability', () => {
   });
 });
 
+describe('mapAvailabilitySubmission', () => {
+  it('maps an availability_submissions row, including a not-yet-confirmed (submitted_at null) row', () => {
+    const mapped = mapAvailabilitySubmission({
+      id: 'sub1',
+      driver_id: 'd1',
+      resort_id: 'r1',
+      week_start: '2027-01-04',
+      submitted_at: null,
+      reopened_at: '2027-01-05T00:00:00Z',
+      reopened_reason: 'shift_time_changed',
+      shift_count_at_submission: 3,
+      created_at: '',
+      updated_at: '',
+    });
+    expect(mapped).toEqual({
+      driverId: 'd1',
+      resortId: 'r1',
+      weekStart: '2027-01-04',
+      submittedAt: null,
+      reopenedAt: '2027-01-05T00:00:00Z',
+      reopenedReason: 'shift_time_changed',
+    });
+  });
+});
+
 describe('RPC response mapping', () => {
   it('maps week_availability_status(), defaulting a null missing_shift_ids to []', () => {
     const mapped = mapWeekAvailabilityStatus({
@@ -259,23 +284,30 @@ describe('RPC response mapping', () => {
   });
 });
 
+describe('Stage 2D Checkpoint 4: atomic shift RPC response mapping', () => {
+  it('maps create_shift(), including the internal key (never surfaced to the manager, kept only for logging)', () => {
+    const mapped = mapCreateShiftResult({ shift_type_id: 'st1', key: 'dinner_2' });
+    expect(mapped).toEqual({ shiftTypeId: 'st1', key: 'dinner_2' });
+  });
+
+  it('maps revise_shift()/deactivate_shift()/reactivate_shift() -- all three share the same { shift_type_id } row shape', () => {
+    expect(mapShiftMutationResult({ shift_type_id: 'st1' })).toEqual({ shiftTypeId: 'st1' });
+  });
+});
+
 describe('Stage 2C RPC response mapping', () => {
-  it('maps materialise_shift_instances(), including the Stage 2D Checkpoint 3 missing-rule counts', () => {
+  it('maps materialise_shift_instances() -- no missing-rota-rule or missing-payroll-rule count exists any more (Stage 2D staffing simplification / Payroll Checkpoint A)', () => {
     const mapped = mapMaterialiseShiftsResult({
       created_count: 5,
       skipped_existing_count: 2,
       from_date: '2024-01-01',
       to_date: '2024-02-29',
-      missing_payroll_rule_count: 1,
-      missing_rota_rule_count: 3,
     });
     expect(mapped).toEqual({
       createdCount: 5,
       skippedExistingCount: 2,
       fromDate: '2024-01-01',
       toDate: '2024-02-29',
-      missingPayrollRuleCount: 1,
-      missingRotaRuleCount: 3,
     });
   });
 

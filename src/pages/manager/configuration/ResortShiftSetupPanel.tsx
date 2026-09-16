@@ -2,227 +2,236 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
-import { Badge } from '../../../components/ui/Badge';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { InlineNotice } from '../../../components/ui/InlineNotice';
 import { Modal, ConfirmDialog } from '../../../components/ui/Modal';
-import { IconEdit, IconPlus } from '../../../components/ui/icons';
+import { IconMapPin, IconPlus } from '../../../components/ui/icons';
 import { getRepositories } from '../../../repositories';
-import type { ShiftTypeRecord } from '../../../repositories/domain';
+import type { ResortRecord } from '../../../repositories/domain';
 import { describeConfigurationError } from './errorMessages';
-import { RecurringScheduleCard } from './RecurringScheduleCard';
-import { slugifyKey } from './slugifyKey';
+import { ShiftSetupPanel } from './ShiftSetupPanel';
 
+type ResortFilter = 'active' | 'inactive' | 'all';
+
+/**
+ * Stage 2D Checkpoint 4.1: resort lifecycle management (Add/Deactivate/
+ * Reactivate). Checkpoint 4.1 UX amendment: resort *selection* for Shift
+ * Setup is a separate, explicit "Choose resort" control below -- manual
+ * testing found that folding selection into the Resorts management list
+ * (clicking a row) left it unclear which resort's shifts were currently
+ * being edited. The Resorts list below is lifecycle management only; it
+ * no longer doubles as the selector. The "Choose resort" control only
+ * ever lists ACTIVE resorts, matching §5's "normal operational selectors
+ * show active resorts only".
+ */
 export function ResortShiftSetupPanel() {
+  const queryClient = useQueryClient();
   const [selectedResortId, setSelectedResortId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ResortFilter>('active');
+  const [showAdd, setShowAdd] = useState(false);
+  const [deactivatingResort, setDeactivatingResort] = useState<ResortRecord | null>(null);
 
   const resortsQuery = useQuery({
     queryKey: ['config', 'resorts'],
     queryFn: () => getRepositories().resorts.listResorts(),
   });
 
-  // Default to the first resort once resorts load, without fighting a
-  // manager's own later selection.
-  useEffect(() => {
-    if (!selectedResortId && resortsQuery.data && resortsQuery.data.length > 0) {
-      setSelectedResortId(resortsQuery.data[0].id);
-    }
-  }, [resortsQuery.data, selectedResortId]);
+  const activeResorts = useMemo(() => (resortsQuery.data ?? []).filter((r) => r.isActive), [resortsQuery.data]);
 
-  const selectedResort = useMemo(
-    () => resortsQuery.data?.find((r) => r.id === selectedResortId) ?? null,
-    [resortsQuery.data, selectedResortId]
-  );
+  // Default to the first active resort once resorts load, without fighting
+  // a manager's own later selection -- but a resort that just got
+  // deactivated (by this manager, in this same session) must not stay
+  // "selected" with nothing valid to configure underneath it.
+  useEffect(() => {
+    if (!resortsQuery.data) return;
+    const stillValidSelection = selectedResortId !== null && activeResorts.some((r) => r.id === selectedResortId);
+    if (!stillValidSelection) {
+      setSelectedResortId(activeResorts[0]?.id ?? null);
+    }
+  }, [resortsQuery.data, activeResorts, selectedResortId]);
+
+  const selectedResort = useMemo(() => activeResorts.find((r) => r.id === selectedResortId) ?? null, [activeResorts, selectedResortId]);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['config', 'resorts'] });
+
+  const filteredResorts = useMemo(() => {
+    const resorts = resortsQuery.data ?? [];
+    const byFilter = filter === 'all' ? resorts : resorts.filter((r) => (filter === 'active' ? r.isActive : !r.isActive));
+    return [...byFilter].sort((a, b) => a.name.localeCompare(b.name));
+  }, [resortsQuery.data, filter]);
 
   return (
     <>
       <Card style={{ marginBottom: 16 }}>
-        <CardHeader title="Resorts" />
+        <CardHeader
+          title="Resorts"
+          action={
+            <Button variant="primary" size="sm" onClick={() => setShowAdd(true)}>
+              <IconPlus style={{ width: 14, height: 14 }} />
+              Add Resort
+            </Button>
+          }
+        />
+
+        <div className="shift-setup-filter segmented" role="tablist" aria-label="Filter resorts">
+          {(['active', 'inactive', 'all'] as const).map((f) => (
+            <button
+              key={f}
+              role="tab"
+              aria-selected={filter === f}
+              className={`segmented__item${filter === f ? ' is-active' : ''}`}
+              onClick={() => setFilter(f)}
+            >
+              {f === 'active' ? 'Active' : f === 'inactive' ? 'Inactive' : 'All'}
+            </button>
+          ))}
+        </div>
+
         {resortsQuery.isLoading ? (
           <div className="config-loading">Loading resorts…</div>
         ) : resortsQuery.isError ? (
           <div className="config-error">
-            <p>Couldn't load resorts. {describeConfigurationError(resortsQuery.error, 'driver')}</p>
+            <p>Couldn't load resorts. {describeConfigurationError(resortsQuery.error, 'resort')}</p>
             <Button variant="secondary" size="sm" onClick={() => resortsQuery.refetch()}>
               Retry
             </Button>
           </div>
-        ) : !resortsQuery.data?.length ? (
-          <EmptyState title="No resorts configured yet" />
+        ) : filteredResorts.length === 0 ? (
+          <EmptyState
+            icon={<IconMapPin />}
+            title={filter === 'inactive' ? 'No inactive resorts' : 'No resorts configured yet'}
+            hint={filter === 'active' ? 'Add a resort to begin scheduling shifts.' : undefined}
+          />
         ) : (
-          <div style={{ padding: 18 }}>
-            <div className="segmented" role="tablist" aria-label="Select resort to configure">
-              {resortsQuery.data.map((r) => (
-                <button
-                  key={r.id}
-                  role="tab"
-                  aria-selected={r.id === selectedResortId}
-                  className={`segmented__item${r.id === selectedResortId ? ' is-active' : ''}`}
-                  onClick={() => setSelectedResortId(r.id)}
-                >
-                  <span className={`resort-dot resort-dot--${r.slug}`} />
-                  {r.name}
-                </button>
-              ))}
-            </div>
-            {selectedResort && (
-              <div className="config-resort-info">
-                <span>
-                  Now configuring <strong>{selectedResort.name}</strong>
-                </span>
-                <Badge tone="blue">{selectedResort.timezone}</Badge>
-                <StatusPill tone={selectedResort.isActive ? 'green' : 'grey'}>
-                  {selectedResort.isActive ? 'Active' : 'Inactive'}
-                </StatusPill>
-              </div>
-            )}
+          <div className="shift-setup-list">
+            {filteredResorts.map((resort) => (
+              <ResortRow
+                key={resort.id}
+                resort={resort}
+                onDeactivate={() => setDeactivatingResort(resort)}
+                onReactivated={invalidate}
+              />
+            ))}
           </div>
         )}
       </Card>
 
-      {selectedResort && <ShiftTypesCard resortId={selectedResort.id} resortName={selectedResort.name} />}
+      {activeResorts.length > 0 && (
+        <Card style={{ marginBottom: 16 }}>
+          <CardHeader title="Choose resort" />
+          <div className="resort-chooser segmented" role="tablist" aria-label="Choose resort">
+            {activeResorts.map((resort) => (
+              <button
+                key={resort.id}
+                role="tab"
+                aria-selected={resort.id === selectedResortId}
+                className={`segmented__item${resort.id === selectedResortId ? ' is-active' : ''}`}
+                onClick={() => setSelectedResortId(resort.id)}
+              >
+                {resort.name}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
-      {selectedResort && <RecurringScheduleCard resortId={selectedResort.id} resortName={selectedResort.name} />}
+      {showAdd && (
+        <AddResortModal
+          onClose={() => setShowAdd(false)}
+          onCreated={(resortId) => {
+            setShowAdd(false);
+            invalidate();
+            setSelectedResortId(resortId);
+          }}
+        />
+      )}
+
+      {deactivatingResort && (
+        <DeactivateResortDialog
+          resort={deactivatingResort}
+          onClose={() => setDeactivatingResort(null)}
+          onDeactivated={() => {
+            setDeactivatingResort(null);
+            invalidate();
+          }}
+        />
+      )}
+
+      {selectedResort ? (
+        <ShiftSetupPanel resortId={selectedResort.id} resortName={selectedResort.name} />
+      ) : (
+        !resortsQuery.isLoading &&
+        activeResorts.length === 0 && (
+          <Card>
+            <EmptyState icon={<IconMapPin />} title="Add and activate a resort to start configuring its shifts" />
+          </Card>
+        )
+      )}
     </>
   );
 }
 
-function ShiftTypesCard({ resortId, resortName }: { resortId: string; resortName: string }) {
-  const queryClient = useQueryClient();
-  const [showCreate, setShowCreate] = useState(false);
-  const [editingType, setEditingType] = useState<ShiftTypeRecord | null>(null);
-  const [deactivatingType, setDeactivatingType] = useState<ShiftTypeRecord | null>(null);
-
-  const shiftTypesQuery = useQuery({
-    queryKey: ['config', 'shiftTypes', resortId],
-    queryFn: () => getRepositories().shiftConfiguration.listShiftTypes(resortId),
+function ResortRow({
+  resort,
+  onDeactivate,
+  onReactivated,
+}: {
+  resort: ResortRecord;
+  onDeactivate: () => void;
+  onReactivated: () => void;
+}) {
+  const reactivateMutation = useMutation({
+    mutationFn: () => getRepositories().resorts.reactivateResort(resort.id),
+    onSuccess: onReactivated,
   });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['config', 'shiftTypes', resortId] });
-
-  const sorted = useMemo(() => [...(shiftTypesQuery.data ?? [])].sort((a, b) => a.sortOrder - b.sortOrder), [shiftTypesQuery.data]);
-
   return (
-    <Card>
-      <CardHeader
-        title={`Shift types — ${resortName}`}
-        action={
-          <Button variant="secondary" size="sm" onClick={() => setShowCreate(true)}>
-            <IconPlus style={{ width: 14, height: 14 }} />
-            Add shift type
-          </Button>
-        }
-      />
-      {shiftTypesQuery.isLoading ? (
-        <div className="config-loading">Loading shift types…</div>
-      ) : shiftTypesQuery.isError ? (
-        <div className="config-error">
-          <p>Couldn't load shift types. {describeConfigurationError(shiftTypesQuery.error, 'shiftType')}</p>
-          <Button variant="secondary" size="sm" onClick={() => shiftTypesQuery.refetch()}>
-            Retry
-          </Button>
+    <div className="config-list-item shift-setup-card">
+      <div className="config-list-item__main">
+        <span className={`resort-dot resort-dot--${resort.slug}`} aria-hidden="true" />
+        <div>
+          <div className="config-list-item__title">{resort.name}</div>
         </div>
-      ) : sorted.length === 0 ? (
-        <EmptyState title={`No shift types yet for ${resortName}`} hint="Add the distinct shift rows/services this resort runs, e.g. Lunch, Dinner." />
-      ) : (
-        sorted.map((type) => (
-          <div className="config-list-item" key={type.id}>
-            <div className="config-list-item__main">
-              <div>
-                <div className="config-list-item__title">
-                  {type.name} <span className="config-list-item__key">{type.key}</span>
-                </div>
-                <div className="config-list-item__subtitle">Sort order {type.sortOrder}</div>
-              </div>
-            </div>
-            <div className="config-list-item__badges">
-              {!type.isActive && <StatusPill tone="grey">Inactive</StatusPill>}
-            </div>
-            <div className="config-list-item__actions">
-              <Button variant="ghost" size="sm" icon aria-label={`Edit ${type.name}`} onClick={() => setEditingType(type)}>
-                <IconEdit />
-              </Button>
-              {type.isActive && (
-                <Button variant="danger-outline" size="sm" onClick={() => setDeactivatingType(type)}>
-                  Deactivate
-                </Button>
-              )}
-            </div>
-          </div>
-        ))
+      </div>
+      <div className="config-list-item__badges">
+        <StatusPill tone={resort.isActive ? 'green' : 'grey'}>{resort.isActive ? 'Active' : 'Inactive'}</StatusPill>
+      </div>
+      <div className="config-list-item__actions">
+        {resort.isActive ? (
+          <Button variant="danger-outline" size="sm" onClick={onDeactivate}>
+            Deactivate
+          </Button>
+        ) : (
+          <Button variant="secondary" size="sm" disabled={reactivateMutation.isPending} onClick={() => reactivateMutation.mutate()}>
+            {reactivateMutation.isPending ? 'Reactivating…' : 'Reactivate'}
+          </Button>
+        )}
+      </div>
+      {reactivateMutation.isError && (
+        <div style={{ width: '100%', padding: '0 18px 10px' }}>
+          <InlineNotice tone="error">{describeConfigurationError(reactivateMutation.error, 'resort')}</InlineNotice>
+        </div>
       )}
-
-      {showCreate && (
-        <CreateShiftTypeModal
-          resortId={resortId}
-          existingKeys={new Set((shiftTypesQuery.data ?? []).map((t) => t.key))}
-          nextSortOrder={(shiftTypesQuery.data ?? []).length + 1}
-          onClose={() => setShowCreate(false)}
-          onCreated={() => {
-            setShowCreate(false);
-            invalidate();
-          }}
-        />
-      )}
-
-      {editingType && (
-        <EditShiftTypeModal
-          shiftType={editingType}
-          onClose={() => setEditingType(null)}
-          onSaved={() => {
-            setEditingType(null);
-            invalidate();
-          }}
-        />
-      )}
-
-      {deactivatingType && (
-        <DeactivateShiftTypeDialog
-          shiftType={deactivatingType}
-          onCancel={() => setDeactivatingType(null)}
-          onDeactivated={() => {
-            setDeactivatingType(null);
-            invalidate();
-          }}
-        />
-      )}
-    </Card>
+    </div>
   );
 }
 
-function CreateShiftTypeModal({
-  resortId,
-  existingKeys,
-  nextSortOrder,
-  onClose,
-  onCreated,
-}: {
-  resortId: string;
-  existingKeys: Set<string>;
-  nextSortOrder: number;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
+function AddResortModal({ onClose, onCreated }: { onClose: () => void; onCreated: (resortId: string) => void }) {
   const [name, setName] = useState('');
-  const [key, setKey] = useState('');
-  const [keyTouchedManually, setKeyTouchedManually] = useState(false);
-  const [sortOrder, setSortOrder] = useState(nextSortOrder);
   const [touched, setTouched] = useState(false);
 
   const mutation = useMutation({
-    mutationFn: () => getRepositories().shiftConfiguration.createShiftType({ resortId, key: key.trim(), name: name.trim(), sortOrder }),
-    onSuccess: onCreated,
+    mutationFn: () => getRepositories().resorts.createResort(name.trim()),
+    onSuccess: (result) => onCreated(result.resortId),
   });
 
-  const duplicateKey = existingKeys.has(key.trim());
   const nameError = touched && !name.trim() ? 'Name is required.' : null;
-  const keyError = touched && !key.trim() ? 'Key is required.' : duplicateKey ? 'That key is already used at this resort.' : null;
-  const canSubmit = name.trim().length > 0 && key.trim().length > 0 && !duplicateKey;
+  const canSubmit = name.trim().length > 0;
 
   return (
     <Modal
-      title="Add shift type"
+      title="Add Resort"
       onClose={onClose}
       footer={
         <>
@@ -237,154 +246,53 @@ function CreateShiftTypeModal({
               if (canSubmit) mutation.mutate();
             }}
           >
-            {mutation.isPending ? 'Creating…' : 'Create shift type'}
+            {mutation.isPending ? 'Adding…' : 'Add Resort'}
           </Button>
         </>
       }
     >
-      {mutation.isError && <InlineNotice tone="error">{describeConfigurationError(mutation.error, 'shiftType')}</InlineNotice>}
+      {mutation.isError && <InlineNotice tone="error">{describeConfigurationError(mutation.error, 'resort')}</InlineNotice>}
       <div className="form-field">
-        <label htmlFor="shift-type-name">Display name</label>
-        <input
-          id="shift-type-name"
-          type="text"
-          value={name}
-          onChange={(e) => {
-            const value = e.target.value;
-            setName(value);
-            if (!keyTouchedManually) setKey(slugifyKey(value));
-          }}
-          placeholder="e.g. Dinner"
-          autoFocus
-        />
+        <label htmlFor="resort-form-name">Name</label>
+        <input id="resort-form-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Verbier" autoFocus />
         {nameError && <span className="form-field__error">{nameError}</span>}
       </div>
-      <div className="form-field">
-        <label htmlFor="shift-type-key">Stable key</label>
-        <input
-          id="shift-type-key"
-          type="text"
-          value={key}
-          onChange={(e) => {
-            setKeyTouchedManually(true);
-            setKey(e.target.value);
-          }}
-          placeholder="e.g. dinner"
-        />
-        {keyError && <span className="form-field__error">{keyError}</span>}
-        <span className="form-field__hint">
-          Used as this shift's permanent grid identity. Cannot be changed once created — renaming the display name
-          later won't affect it.
-        </span>
-      </div>
-      <div className="form-field">
-        <label htmlFor="shift-type-sort-order">Sort order</label>
-        <input
-          id="shift-type-sort-order"
-          type="number"
-          min={1}
-          value={sortOrder}
-          onChange={(e) => setSortOrder(Number(e.target.value))}
-        />
-      </div>
     </Modal>
   );
 }
 
-function EditShiftTypeModal({
-  shiftType,
+function DeactivateResortDialog({
+  resort,
   onClose,
-  onSaved,
-}: {
-  shiftType: ShiftTypeRecord;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [name, setName] = useState(shiftType.name);
-  const [sortOrder, setSortOrder] = useState(shiftType.sortOrder);
-
-  const renameMutation = useMutation({
-    mutationFn: async () => {
-      if (name.trim() !== shiftType.name) {
-        await getRepositories().shiftConfiguration.renameShiftType(shiftType.id, name.trim());
-      }
-      if (sortOrder !== shiftType.sortOrder) {
-        await getRepositories().shiftConfiguration.reorderShiftType(shiftType.id, sortOrder);
-      }
-    },
-    onSuccess: onSaved,
-  });
-
-  return (
-    <Modal
-      title={`Edit ${shiftType.name}`}
-      onClose={onClose}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={renameMutation.isPending}>
-            Cancel
-          </Button>
-          <Button variant="primary" disabled={renameMutation.isPending || !name.trim()} onClick={() => renameMutation.mutate()}>
-            {renameMutation.isPending ? 'Saving…' : 'Save changes'}
-          </Button>
-        </>
-      }
-    >
-      {renameMutation.isError && <InlineNotice tone="error">{describeConfigurationError(renameMutation.error, 'shiftType')}</InlineNotice>}
-      <div className="form-field">
-        <label htmlFor="edit-shift-type-name">Display name</label>
-        <input id="edit-shift-type-name" type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-      </div>
-      <div className="form-field">
-        <label htmlFor="edit-shift-type-key">Stable key</label>
-        <input id="edit-shift-type-key" type="text" value={shiftType.key} disabled />
-        <span className="form-field__hint">The key is permanent and can't be edited after creation.</span>
-      </div>
-      <div className="form-field">
-        <label htmlFor="edit-shift-type-sort-order">Sort order</label>
-        <input
-          id="edit-shift-type-sort-order"
-          type="number"
-          min={1}
-          value={sortOrder}
-          onChange={(e) => setSortOrder(Number(e.target.value))}
-        />
-      </div>
-    </Modal>
-  );
-}
-
-function DeactivateShiftTypeDialog({
-  shiftType,
-  onCancel,
   onDeactivated,
 }: {
-  shiftType: ShiftTypeRecord;
-  onCancel: () => void;
+  resort: ResortRecord;
+  onClose: () => void;
   onDeactivated: () => void;
 }) {
   const mutation = useMutation({
-    mutationFn: () => getRepositories().shiftConfiguration.deactivateShiftType(shiftType.id),
+    mutationFn: () => getRepositories().resorts.deactivateResort(resort.id),
     onSuccess: onDeactivated,
   });
 
   return (
     <ConfirmDialog
-      title={`Deactivate ${shiftType.name}?`}
+      title={`Deactivate ${resort.name}?`}
       message={
         <>
-          <p style={{ marginBottom: mutation.isError ? 10 : 0 }}>
-            Historical shift instances already using {shiftType.name} are unaffected. It will no longer be offered
-            for new shifts.
-          </p>
-          {mutation.isError && <InlineNotice tone="error">{describeConfigurationError(mutation.error, 'shiftType')}</InlineNotice>}
+          <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+            <li>{resort.name} will disappear from normal active resort selectors (Shift Setup, Drivers, Payroll Rules, and later Rota).</li>
+            <li>Historical data is retained — drivers, shifts, assignments, payroll records, and audit history are unaffected.</li>
+            <li>Nothing is deleted.</li>
+          </ul>
+          {mutation.isError && <InlineNotice tone="error">{describeConfigurationError(mutation.error, 'resort')}</InlineNotice>}
         </>
       }
       confirmLabel="Deactivate"
       danger
       busy={mutation.isPending}
       onConfirm={() => mutation.mutate()}
-      onCancel={onCancel}
+      onCancel={onClose}
     />
   );
 }
