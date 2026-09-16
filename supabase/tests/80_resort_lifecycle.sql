@@ -177,6 +177,50 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- deactivate_resort: error text formatting regression (forward migration
+-- 20260916100000_fix_deactivate_resort_error_text.sql fixed a PL/pgSQL
+-- RAISE using `%s`, which only recognises a bare `%` -- the literal `s`
+-- was leaking into the manager-facing message, e.g. "2 active driverss").
+-- Two blocking drivers are used deliberately: with exactly one, the bug's
+-- output ("1 active driver" + stray "s" = "1 active drivers") reads as
+-- plausible English by coincidence; with two, the already-pluralised
+-- "2 active drivers" + stray "s" produces an unambiguous "driverss".
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_message_resort uuid;
+begin
+  select resort_id into v_message_resort from create_resort('DB Test Error Text Resort');
+  perform set_config('dbtest.message_resort_id', v_message_resort::text, false);
+  insert into drivers (resort_id, full_name) values (v_message_resort, 'Message Test Driver One');
+  insert into drivers (resort_id, full_name) values (v_message_resort, 'Message Test Driver Two');
+end $$;
+
+do $$
+declare
+  v_message text;
+  v_raised boolean := false;
+begin
+  begin
+    perform deactivate_resort(current_setting('dbtest.message_resort_id')::uuid);
+  exception when others then
+    v_raised := true;
+    v_message := sqlerrm;
+  end;
+
+  perform pg_temp.expect_true('deactivate_resort: rejects a resort with protected dependencies', v_raised);
+  perform pg_temp.expect_equal('deactivate_resort: manager-facing error text is exactly well-formed (no %s artefact)',
+    v_message, 'This resort still has 2 active drivers. Retire these first, then try again.');
+  perform pg_temp.expect_true('deactivate_resort: error text contains no doubled-s formatting artefact',
+    v_message !~ 'driverss|shiftss|instancess|weekss');
+end $$;
+
+select pg_temp.expect_true('deactivate_resort: the resort remains active after the rejected attempt',
+  (select is_active from resorts where id = current_setting('dbtest.message_resort_id')::uuid));
+select pg_temp.expect_true('deactivate_resort: both blocking drivers are untouched -- still active, never silently retired',
+  (select count(*) from drivers where resort_id = current_setting('dbtest.message_resort_id')::uuid and is_active) = 2);
+
+-- ---------------------------------------------------------------------
 -- Selectors: active-only vs historical resolution, and audit.
 -- ---------------------------------------------------------------------
 select pg_temp.expect_true('selectors: an inactive resort can still be resolved directly by id (historical/reporting context)',

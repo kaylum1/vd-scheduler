@@ -76,10 +76,25 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
 | `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of Stage 3 (Driver Availability) this suite has **315 assertions**. That
-number will keep changing as the suite grows — don't chase a specific
-count; the point is that it stays genuinely comprehensive and, unlike its
-scratchpad predecessor, that it survives.
+As of the pre-Manual-Rota cleanup checkpoint this suite has **320
+assertions**. That number will keep changing as the suite grows — don't
+chase a specific count; the point is that it stays genuinely comprehensive
+and, unlike its scratchpad predecessor, that it survives.
+
+## Deployment readiness (pre-launch, local-only today)
+
+This project has no linked hosted Supabase project, no staging/production
+database, and no CI/CD deployment workflow — every migration is only ever
+applied via a full local `supabase db reset`. Some migrations rely on this:
+notably `20260916090000_simplify_shift_staffing.sql` makes
+`shift_templates.required_drivers`/`shift_instances.required_drivers`
+`NOT NULL` with no backfill, which only works against an empty database.
+
+**Before introducing the first persistent hosted Supabase environment**, the
+full migration history must get a deployment-readiness review (backfills for
+any NOT-NULL-without-default changes, idempotency under `supabase migration
+up` rather than `db reset`) — do not assume any migration in this history is
+safe to apply incrementally against existing data until that review happens.
 
 ## Adding a new group
 

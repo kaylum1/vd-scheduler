@@ -12,6 +12,10 @@ import { MockResortRepository } from '../../../repositories/mock/resorts';
 // check below to prove this file never calls supabase.from(...)/.rpc(...)
 // directly.
 import resortShiftSetupPanelSource from './ResortShiftSetupPanel.tsx?raw';
+// The "Choose resort" markup itself now lives in the shared ResortSelector
+// (pre-Manual-Rota cleanup: extracted out of three duplicated copies) --
+// checked separately from resortShiftSetupPanelSource above.
+import resortSelectorSource from '../../../components/ui/ResortSelector.tsx?raw';
 
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -277,8 +281,12 @@ describe('ResortShiftSetupPanel: "Choose resort" selection clarity (Checkpoint 4
     // UI 17): the chooser is built from the same .segmented control already
     // proven to wrap without horizontal overflow at a 375px viewport (the
     // Active/Inactive/All filters above it), not new, unverified markup.
-    expect(resortShiftSetupPanelSource).toMatch(/resort-chooser segmented/);
-    expect(resortShiftSetupPanelSource).not.toMatch(/width:\s*\d+px/);
+    // The markup itself lives in the shared ResortSelector, not this file.
+    expect(resortSelectorSource).toMatch(/resort-chooser segmented/);
+    expect(resortSelectorSource).not.toMatch(/width:\s*\d+px/);
+    // This panel renders the chooser through the shared component, not a
+    // re-implementation of its own.
+    expect(resortShiftSetupPanelSource).toMatch(/<ResortSelector\b/);
   });
 });
 

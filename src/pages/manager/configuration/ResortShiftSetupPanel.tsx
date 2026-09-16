@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useMemo, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { StatusPill } from '../../../components/ui/StatusPill';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { InlineNotice } from '../../../components/ui/InlineNotice';
 import { Modal, ConfirmDialog } from '../../../components/ui/Modal';
+import { ResortSelector, useActiveResortSelection } from '../../../components/ui/ResortSelector';
 import { IconMapPin, IconPlus } from '../../../components/ui/icons';
 import { getRepositories } from '../../../repositories';
 import type { ResortRecord } from '../../../repositories/domain';
@@ -27,31 +28,11 @@ type ResortFilter = 'active' | 'inactive' | 'all';
  */
 export function ResortShiftSetupPanel() {
   const queryClient = useQueryClient();
-  const [selectedResortId, setSelectedResortId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ResortFilter>('active');
   const [showAdd, setShowAdd] = useState(false);
   const [deactivatingResort, setDeactivatingResort] = useState<ResortRecord | null>(null);
 
-  const resortsQuery = useQuery({
-    queryKey: ['config', 'resorts'],
-    queryFn: () => getRepositories().resorts.listResorts(),
-  });
-
-  const activeResorts = useMemo(() => (resortsQuery.data ?? []).filter((r) => r.isActive), [resortsQuery.data]);
-
-  // Default to the first active resort once resorts load, without fighting
-  // a manager's own later selection -- but a resort that just got
-  // deactivated (by this manager, in this same session) must not stay
-  // "selected" with nothing valid to configure underneath it.
-  useEffect(() => {
-    if (!resortsQuery.data) return;
-    const stillValidSelection = selectedResortId !== null && activeResorts.some((r) => r.id === selectedResortId);
-    if (!stillValidSelection) {
-      setSelectedResortId(activeResorts[0]?.id ?? null);
-    }
-  }, [resortsQuery.data, activeResorts, selectedResortId]);
-
-  const selectedResort = useMemo(() => activeResorts.find((r) => r.id === selectedResortId) ?? null, [activeResorts, selectedResortId]);
+  const { resortsQuery, activeResorts, selectedResortId, setSelectedResortId, selectedResort } = useActiveResortSelection();
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['config', 'resorts'] });
 
@@ -117,24 +98,7 @@ export function ResortShiftSetupPanel() {
         )}
       </Card>
 
-      {activeResorts.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <CardHeader title="Choose resort" />
-          <div className="resort-chooser segmented" role="tablist" aria-label="Choose resort">
-            {activeResorts.map((resort) => (
-              <button
-                key={resort.id}
-                role="tab"
-                aria-selected={resort.id === selectedResortId}
-                className={`segmented__item${resort.id === selectedResortId ? ' is-active' : ''}`}
-                onClick={() => setSelectedResortId(resort.id)}
-              >
-                {resort.name}
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
+      <ResortSelector resorts={activeResorts} selectedResortId={selectedResortId} onSelect={setSelectedResortId} />
 
       {showAdd && (
         <AddResortModal

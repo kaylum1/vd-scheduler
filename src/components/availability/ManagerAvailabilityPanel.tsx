@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardHeader } from '../ui/Card';
 import { StatusPill, type StatusTone } from '../ui/StatusPill';
 import { EmptyState } from '../ui/EmptyState';
+import { ResortSelector, useActiveResortSelection } from '../ui/ResortSelector';
 import { WeekNav } from '../rota/WeekNav';
 import { IconCalendar, IconClock, IconLock } from '../ui/icons';
 import { addDays, formatDayLabel, parseISODate, startOfWeek, toISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
@@ -35,24 +36,11 @@ const STATE_TONE: Record<DriverWeekAvailabilityState, StatusTone> = {
  */
 export function ManagerAvailabilityPanel() {
   const todayWeekStartIso = toISODate(startOfWeek(getOperationalToday()));
-  const [selectedResortId, setSelectedResortId] = useState<string | null>(null);
   const [weekStartIso, setWeekStartIso] = useState(todayWeekStartIso);
   const [expandedDriverId, setExpandedDriverId] = useState<string | null>(null);
   const weekStartDate = parseISODate(weekStartIso);
 
-  const resortsQuery = useQuery({
-    queryKey: ['config', 'resorts'],
-    queryFn: () => getRepositories().resorts.listResorts(),
-  });
-  const activeResorts = useMemo(() => (resortsQuery.data ?? []).filter((r) => r.isActive), [resortsQuery.data]);
-
-  useEffect(() => {
-    if (!resortsQuery.data) return;
-    const stillValid = selectedResortId !== null && activeResorts.some((r) => r.id === selectedResortId);
-    if (!stillValid) setSelectedResortId(activeResorts[0]?.id ?? null);
-  }, [resortsQuery.data, activeResorts, selectedResortId]);
-
-  const selectedResort = useMemo(() => activeResorts.find((r) => r.id === selectedResortId) ?? null, [activeResorts, selectedResortId]);
+  const { activeResorts, selectedResortId, setSelectedResortId, selectedResort } = useActiveResortSelection();
 
   const summaryQuery = useQuery({
     queryKey: ['availability', 'managerSummary', selectedResortId, weekStartIso],
@@ -70,27 +58,17 @@ export function ManagerAvailabilityPanel() {
 
   return (
     <>
-      {activeResorts.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <CardHeader title="Choose resort" />
-          <div className="resort-chooser segmented" role="tablist" aria-label="Choose resort">
-            {activeResorts.map((resort) => (
-              <button
-                key={resort.id}
-                role="tab"
-                aria-selected={resort.id === selectedResortId}
-                className={`segmented__item${resort.id === selectedResortId ? ' is-active' : ''}`}
-                onClick={() => {
-                  setSelectedResortId(resort.id);
-                  setExpandedDriverId(null);
-                }}
-              >
-                {resort.name}
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
+      <ResortSelector
+        resorts={activeResorts}
+        selectedResortId={selectedResortId}
+        onSelect={(resortId) => {
+          setSelectedResortId(resortId);
+          // Different semantics from the other two consumers: switching
+          // resort must also collapse any expanded driver detail row, since
+          // that detail belongs to a driver at the *previous* resort.
+          setExpandedDriverId(null);
+        }}
+      />
 
       <Card style={{ marginBottom: 16 }}>
         <CardHeader

@@ -11,6 +11,10 @@ import { MockPayrollRulesRepository } from '../../../repositories/mock/payrollRu
 // Raw source text -- used only by the architecture check below to prove
 // this file never calls supabase.from(...)/.rpc(...) directly.
 import payrollRulesPanelSource from './PayrollRulesPanel.tsx?raw';
+// The "Choose resort" markup itself now lives in the shared ResortSelector
+// (pre-Manual-Rota cleanup: extracted out of three duplicated copies) --
+// checked separately from payrollRulesPanelSource above.
+import resortSelectorSource from '../../../components/ui/ResortSelector.tsx?raw';
 
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -346,7 +350,11 @@ describe('PayrollRulesPanel: mock mode / architecture', () => {
 // =======================================================================
 describe('PayrollRulesPanel: responsive structure', () => {
   it('25. reuses the already mobile-verified .segmented resort chooser and filter controls -- no new bespoke layout, no hard-coded pixel widths', () => {
-    expect(payrollRulesPanelSource).toMatch(/resort-chooser segmented/);
+    // Resort chooser markup lives in the shared ResortSelector; this panel
+    // only renders it via <ResortSelector>, not a re-implementation.
+    expect(resortSelectorSource).toMatch(/resort-chooser segmented/);
+    expect(resortSelectorSource).not.toMatch(/width:\s*\d+px/);
+    expect(payrollRulesPanelSource).toMatch(/<ResortSelector\b/);
     expect(payrollRulesPanelSource).toMatch(/shift-setup-filter segmented/);
     expect(payrollRulesPanelSource).not.toMatch(/width:\s*\d+px/);
   });

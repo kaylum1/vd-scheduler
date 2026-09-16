@@ -380,6 +380,88 @@ describe('ShiftSetupPanel: Deactivate Shift', () => {
     // clearly-labelled review step is even attempted.
     expect(await screen.findByText(/Reviewing already-generated shifts needs Supabase mode/i)).toBeInTheDocument();
   });
+
+  it('39. a preview with protected (published/attended) rows reports them as excluded, never as safe to cancel', async () => {
+    // previewTemplateCancellation is unsupported in mock mode by default
+    // (test 26) -- stub it here with a real, mixed safe/protected result so
+    // the actual preview-rendering branch (ShiftSetupPanel's `stage ===
+    // 'preview'` step, not the "Supabase mode" fallback) gets exercised.
+    vi.spyOn(MockShiftConfigurationRepository.prototype, 'previewTemplateCancellation').mockResolvedValue([
+      {
+        shiftInstanceId: 'safe-1',
+        date: '2026-12-01',
+        shiftTypeId: 'mock-crans-dinner',
+        shiftKey: 'dinner',
+        name: 'Dinner',
+        isPublished: false,
+        assignmentCount: 0,
+        hasAvailabilityAnswers: false,
+        hasAttendance: false,
+        isSafeToCancel: true,
+      },
+      {
+        shiftInstanceId: 'protected-1',
+        date: '2026-12-08',
+        shiftTypeId: 'mock-crans-dinner',
+        shiftKey: 'dinner',
+        name: 'Dinner',
+        isPublished: true,
+        assignmentCount: 2,
+        hasAvailabilityAnswers: true,
+        hasAttendance: false,
+        isSafeToCancel: false,
+      },
+    ]);
+
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    await screen.findByRole('heading', { name: 'Deactivate Dinner?' });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
+
+    await screen.findByRole('heading', { name: 'Review affected Dinner shifts' });
+    const dialog = screen.getByRole('dialog');
+
+    // Both rows are counted in the total...
+    expect(within(dialog).getByText('2')).toBeInTheDocument();
+    // ...but the protected one is called out separately, distinguishable
+    // from the safe one, and never folded into "safe to cancel".
+    expect(within(dialog).getByText(/1 shift was not changed — already published or with recorded attendance/i)).toBeInTheDocument();
+    // The action button only ever offers to cancel the safe subset (1), not
+    // the full preview count (2) -- the protected row is excluded from it.
+    expect(within(dialog).getByRole('button', { name: 'Cancel 1 shift' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Cancel 2 shifts' })).not.toBeInTheDocument();
+  });
+
+  it('40. a preview where every row is protected offers nothing safe to cancel', async () => {
+    vi.spyOn(MockShiftConfigurationRepository.prototype, 'previewTemplateCancellation').mockResolvedValue([
+      {
+        shiftInstanceId: 'protected-only-1',
+        date: '2026-12-08',
+        shiftTypeId: 'mock-crans-dinner',
+        shiftKey: 'dinner',
+        name: 'Dinner',
+        isPublished: true,
+        assignmentCount: 1,
+        hasAvailabilityAnswers: true,
+        hasAttendance: true,
+        isSafeToCancel: false,
+      },
+    ]);
+
+    renderPanel();
+    await screen.findByText('Dinner');
+    fireEvent.click(screen.getByRole('button', { name: 'Deactivate' }));
+    await screen.findByRole('heading', { name: 'Deactivate Dinner?' });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Deactivate' }));
+
+    await screen.findByRole('heading', { name: 'Review affected Dinner shifts' });
+    const dialog = screen.getByRole('dialog');
+
+    expect(within(dialog).getByText(/1 shift was not changed — already published or with recorded attendance/i)).toBeInTheDocument();
+    // "Cancel 0 shifts" is disabled -- there is nothing safe to act on.
+    expect(within(dialog).getByRole('button', { name: 'Cancel 0 shifts' })).toBeDisabled();
+  });
 });
 
 // =======================================================================

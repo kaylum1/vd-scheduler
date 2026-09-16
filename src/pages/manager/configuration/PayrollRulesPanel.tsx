@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
@@ -6,6 +6,7 @@ import { StatusPill } from '../../../components/ui/StatusPill';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { InlineNotice } from '../../../components/ui/InlineNotice';
 import { Modal } from '../../../components/ui/Modal';
+import { ResortSelector, useActiveResortSelection } from '../../../components/ui/ResortSelector';
 import { IconPayroll, IconTruck } from '../../../components/ui/icons';
 import { getRepositories } from '../../../repositories';
 import type { DriverDeliveryRateRecord, DriverRecord, ShiftBasePayRuleRecord, ShiftRecord } from '../../../repositories/domain';
@@ -51,49 +52,17 @@ function chf(amount: number): string {
  * calculation/finalisation belongs here (see docs/business-rules.md
  * section G and Configuration -> Dashboard for those, once built).
  *
- * Resort selection reuses the exact "Choose resort" pattern established in
- * Resort & Shift Setup (Stage 2D Checkpoint 4.1's UX amendment) rather than
- * inventing a second, inconsistent selector -- active resorts only.
+ * Resort selection uses the shared <ResortSelector>/useActiveResortSelection
+ * (components/ui/ResortSelector.tsx), the same "Choose resort" pattern
+ * established in Resort & Shift Setup (Stage 2D Checkpoint 4.1's UX
+ * amendment) -- active resorts only.
  */
 export function PayrollRulesPanel() {
-  const [selectedResortId, setSelectedResortId] = useState<string | null>(null);
-
-  const resortsQuery = useQuery({
-    queryKey: ['config', 'resorts'],
-    queryFn: () => getRepositories().resorts.listResorts(),
-  });
-  const activeResorts = useMemo(() => (resortsQuery.data ?? []).filter((r) => r.isActive), [resortsQuery.data]);
-
-  useEffect(() => {
-    if (!resortsQuery.data) return;
-    const stillValidSelection = selectedResortId !== null && activeResorts.some((r) => r.id === selectedResortId);
-    if (!stillValidSelection) {
-      setSelectedResortId(activeResorts[0]?.id ?? null);
-    }
-  }, [resortsQuery.data, activeResorts, selectedResortId]);
-
-  const selectedResort = useMemo(() => activeResorts.find((r) => r.id === selectedResortId) ?? null, [activeResorts, selectedResortId]);
+  const { resortsQuery, activeResorts, selectedResortId, setSelectedResortId, selectedResort } = useActiveResortSelection();
 
   return (
     <>
-      {activeResorts.length > 0 && (
-        <Card style={{ marginBottom: 16 }}>
-          <CardHeader title="Choose resort" />
-          <div className="resort-chooser segmented" role="tablist" aria-label="Choose resort">
-            {activeResorts.map((resort) => (
-              <button
-                key={resort.id}
-                role="tab"
-                aria-selected={resort.id === selectedResortId}
-                className={`segmented__item${resort.id === selectedResortId ? ' is-active' : ''}`}
-                onClick={() => setSelectedResortId(resort.id)}
-              >
-                {resort.name}
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
+      <ResortSelector resorts={activeResorts} selectedResortId={selectedResortId} onSelect={setSelectedResortId} />
 
       {selectedResort ? (
         <PayrollRulesForResort resortId={selectedResort.id} resortName={selectedResort.name} />

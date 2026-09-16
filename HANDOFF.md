@@ -202,16 +202,16 @@ Discovered mid-checkpoint: `AppStateContext`'s driver switcher (`activeDriverId`
 
 ---
 
-## 7. Test and build status (verified fresh at the top of this session, before writing this file)
+## 7. Test and build status (updated after the pre-Manual-Rota cleanup checkpoint, §10)
 
 ```
-npx vitest run     → 351/351 passed (28 test files)
-npm run test:db    → 315/315 assertions passed (13 DB regression groups)
+npx vitest run     → 360/360 passed (29 test files)
+npm run test:db    → 320/320 assertions passed (13 DB regression groups)
 npm run build      → clean (tsc -b && vite build), only the pre-existing bundle-size warning
 ```
 
 DB regression groups (see `docs/db-testing.md` for the full description of each):
-`00_core_schema` (19), `10_availability_publication` (30), `20_assignments_attendance_adjustments` (14), `30_security_rls_audit` (35), `35_driver_safe_views` (8), `40_materialisation_template_safety` (35), `50_language_onfleet` (12), `60_shift_staffing` (21), `70_atomic_shift_rpcs` (27), `80_resort_lifecycle` (31), `90_payroll_rate_foundations` (29), `95_payroll_rate_rpcs` (31), `97_payroll_rate_corrections` (23).
+`00_core_schema` (19), `10_availability_publication` (30), `20_assignments_attendance_adjustments` (14), `30_security_rls_audit` (35), `35_driver_safe_views` (8), `40_materialisation_template_safety` (35), `50_language_onfleet` (12), `60_shift_staffing` (21), `70_atomic_shift_rpcs` (27), `80_resort_lifecycle` (36), `90_payroll_rate_foundations` (29), `95_payroll_rate_rpcs` (31), `97_payroll_rate_corrections` (23).
 
 **To reproduce:** `npx supabase start` (if not running) → `npm run db:reset:test` → `npm run test:db`, and separately `npx vitest run` (make sure `.env.local` is `mock` first — see §6.1).
 
@@ -230,6 +230,8 @@ DB regression groups (see `docs/db-testing.md` for the full description of each)
   e9fc691  Add payroll rate correction workflow
   3f4d073  Simplify shift staffing model
   cf875e5  Add live driver availability
+  ed0ca64  docs: add session handoff for payroll staffing availability
+  (+ one more)  Prepare manual rota foundation (pre-Manual-Rota cleanup, §10)
   ```
 - **PR:** [#1 — "Manager shift/payroll simplification and live driver availability"](https://github.com/kaylum1/vd-scheduler/pull/1), open, not a draft, base `main`, head `feature/payroll-staffing-and-availability`, mergeable, **not yet reviewed/merged** as of this writing.
 - `origin/main` is at `f902737` ("Add persistent database regression suite") — 8 commits behind this branch.
@@ -241,7 +243,25 @@ DB regression groups (see `docs/db-testing.md` for the full description of each)
 
 1. **Check PR #1's status first** — has it been reviewed/merged since this handoff was written? `gh pr view 1 --json state,mergeable`. If merged, start the next checkpoint from a fresh branch off `main`. If still open, ask the user whether to keep stacking commits on `feature/payroll-staffing-and-availability` or branch separately.
 2. **Confirm `.env.local` is `mock`** before running anything (see §6.1) — `cat .env.local`.
-3. **Wait for the user's next checkpoint instruction.** Based on the pattern established this session (see §2) and the explicit "next checkpoint" recommendation given at the end of the Stage 3 report, the most likely next request is **Manual Rota (assignment)**: a manager UI to assign specific drivers to specific shift_instances, using the availability data now live from Stage 3 (the manager's per-driver availability detail view built this session is a natural building block — surface it alongside an "Assign" action rather than rebuilding it). Do not start this or any other new checkpoint (Auto-Rota, Publish, Attendance, Onfleet, Payroll calculation) without an explicit instruction — the user has been precise and sequential about scope every single checkpoint this session, and each instruction has ended with an explicit "DO NOT BEGIN X" boundary.
+3. **Wait for the user's next checkpoint instruction.** A pre-Manual-Rota cleanup checkpoint (§10) has now been completed and approved. The next checkpoint is confirmed to be **Manual Rota (assignment)**: a manager UI to assign specific drivers to specific shift_instances, using the availability data now live from Stage 3 (the manager's per-driver availability detail view built in that session is a natural building block — surface it alongside an "Assign" action rather than rebuilding it), plus the newly-shared `<ResortSelector>` for resort/week selection. Do not start this or any other new checkpoint (Auto-Rota, Publish, Attendance, Onfleet, Payroll calculation) without an explicit instruction — the user has been precise and sequential about scope every checkpoint, and each instruction has ended with an explicit "DO NOT BEGIN X" boundary.
 4. **If asked to continue Driver Availability polish or fix a bug in it:** re-read §3.9, §4.4, §4.6, and §6.2–6.3 first — the mock-mode identity bridge and the weekday-filtering fix are easy to accidentally regress.
 5. **If asked to convert another Stage-1.1 page to live data** (Dashboard, Manager Rota grid, or `MyRota.tsx`): reuse the identity-bridge pattern from §6.2 rather than re-inventing it, and check whether it's now worth centralizing.
 6. **General working pattern observed this session** (replicate it): architecture review report-only when the user asks for one → wait for explicit approval/amendment → implement → run full frontend + DB regression suites → manual real-Supabase walkthrough via the browser tool for anything RLS/trigger/multi-role-sensitive → update `docs/business-rules.md` and `docs/db-testing.md` → isolated commit → stop and report using the exact numbered items the user's checkpoint message asked for.
+
+---
+
+## 10. Pre-Manual-Rota cleanup checkpoint
+
+A follow-up session ran a full pre-merge review of PR #1 (9 findings, all non-blocking), then ran one small isolated cleanup checkpoint addressing the highest-priority findings before Manual Rota — approved and completed. Manual Rota, Auto-Rota, and Attendance were **not** started; no approved business behaviour changed.
+
+**Deployment policy (approved, documented only):** confirmed this project has no linked hosted Supabase project, no staging/production DB, no CI/CD — every migration only ever runs via a full local `supabase db reset`. `20260916090000_simplify_shift_staffing.sql` staying dependent on a clean reset is accepted as correct for now (no backfill added, no silent `required_drivers` coalesce). A concise warning was added to `docs/db-testing.md` requiring a deployment-readiness review before the first persistent hosted environment exists.
+
+**`deactivate_resort` error-text fix:** the historical migration `20260915115014_resort_lifecycle_management.sql` was left untouched (append-only history). A new forward migration, `supabase/migrations/20260916100000_fix_deactivate_resort_error_text.sql`, redefines `deactivate_resort` via `CREATE OR REPLACE FUNCTION` with the exact same parameters/return type/`SECURITY DEFINER`/`search_path`/authorization/dependency checks/audit behaviour — the only change is `raise exception '...%s...'` → `'...%...'` (PL/pgSQL `RAISE` has no printf-style `%s`; the old code left a stray `s` in manager-facing text, e.g. "2 active shiftss"). Regression-tested in `supabase/tests/80_resort_lifecycle.sql` (exact-string assertion on the well-formed message, +5 assertions) and manually re-verified against real Supabase: "This resort still has 1 active driver, 2 active shifts. Retire these first, then try again."
+
+**Protected-rows deactivation UI coverage:** `ShiftSetupPanel.test.tsx` gained two tests (39, 40) driving the real `previewTemplateCancellation` "preview" branch via a mocked mixed safe/protected result — previously untested, since mock mode's real implementation always throws "not supported."
+
+**Shared `<ResortSelector>` / `useActiveResortSelection`:** the "Choose resort" segmented-pill pattern, previously duplicated near-verbatim across `ResortShiftSetupPanel.tsx`, `PayrollRulesPanel.tsx`, and `ManagerAvailabilityPanel.tsx`, is now one shared implementation at `src/components/ui/ResortSelector.tsx` — `useActiveResortSelection()` owns the resorts query/active-filter/auto-reselect/selected-resort state, `<ResortSelector resorts selectedResortId onSelect>` is the pure presentational control. Each consumer still supplies its own `onSelect` (Manager Availability's also collapses its expanded driver row — that stayed page-local, not pushed into the shared component, per "don't force genuinely different semantics into a bad abstraction"). Covered by a new `src/components/ui/ResortSelector.test.tsx` (7 tests) plus the existing page-level tests, updated only where they asserted resort-chooser markup against the wrong file's raw source post-extraction. Manually re-verified identical behaviour (including mobile 375px width) across all three real pages in Supabase mode.
+
+**Explicitly deferred (per the checkpoint's own scope boundary, untouched):** mock `identityBridge.ts` name matching, `describeShiftError` generic coverage gap, the required-driver RPC's generic-fallback error mapping, mock `reviseShift`'s effective-date semantic difference from the real RPC, and `PayrollRulesPanel`'s unmemoized `categorizeRatePeriods`. See the PR #1 pre-merge review findings for detail on each if picked up later.
+
+**Manual Rota + live manager coverage is confirmed safe to begin next**, pending the user's explicit go-ahead.
