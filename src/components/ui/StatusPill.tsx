@@ -22,19 +22,22 @@ export function StatusPill({
  * counts.
  *
  * PRODUCT RULE (see docs/business-rules.md §A): a shift's coverage state is
- * one of three, never conflated:
+ * one of two in normal operation, never conflated:
  *   - NO SERVICE: no shift_instance exists at all for that date — not this
  *     function's concern. Render a neutral/empty state instead (see
  *     EmptyShiftCell in components/rota/ShiftCard.tsx, and the "No shifts
  *     scheduled" branch in components/dashboard/TodayTomorrowPanel.tsx) —
  *     never by calling coverageTone(0, 0), which would misreport it as red.
- *   - STAFFING NOT CONFIGURED (Stage 2D Checkpoint 3): a real shift_instance
- *     exists but required is NULL — no rota_rules_* row applied at
- *     materialisation time. Amber/"Needs Attention", distinct from a real
- *     under-staffed shift — call these with required === null.
- *   - UNCOVERED / COVERED: a real shift_instance with a configured (non-
- *     null) required count. Call these only once a real shift_instance is
- *     in hand.
+ *   - UNCOVERED / COVERED: a real shift_instance with a required count
+ *     (mandatory since the Stage 2D staffing simplification -- always a
+ *     real positive number, never missing). Call these only once a real
+ *     shift_instance is in hand.
+ *
+ * `required === null` (amber, "Staffing not configured") is a defensive
+ * fallback for legacy pre-simplification data only -- required_drivers is
+ * mandatory at Shift-creation time now, so a normal materialised instance
+ * can never actually be null. Never expect a manager to see this on data
+ * created since.
  */
 export function coverageTone(filled: number, required: number | null): StatusTone {
   if (required === null) return 'amber';

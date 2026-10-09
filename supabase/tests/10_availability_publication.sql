@@ -13,7 +13,7 @@ declare
 begin
   select shift_type_id into v_shift_type_id from create_shift(
     v_resort_id, 'Availability Test Shift', '17:00'::time, '21:00'::time,
-    array[0,1,2,3,4,5,6]::smallint[], '2027-03-01'::date, null
+    array[0,1,2,3,4,5,6]::smallint[], 1, '2027-03-01'::date, null
   );
   perform set_config('dbtest.avail_shift_type', v_shift_type_id::text, false);
   -- 2027-03-01 is a Monday.
@@ -131,14 +131,14 @@ begin
   -- shift_type_id, not a duplicate of the already-materialised one).
   select shift_type_id into v_extra_shift_type_id from create_shift(
     current_setting('dbtest.resort_a')::uuid, 'Availability Test Extra Shift', '12:00'::time, '13:00'::time,
-    array[2]::smallint[], '2027-03-01'::date, null
+    array[2]::smallint[], 1, '2027-03-01'::date, null
   );
   perform set_config('dbtest.avail_extra_shift_type', v_extra_shift_type_id::text, false);
 
   -- shift_added: inserting a new active instance for the same resort/week
   -- reopens the confirmation.
-  insert into shift_instances (resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, status, origin)
-  select resort_id, '2027-03-03', v_extra_shift_type_id, shift_key || '_extra', name, sort_order, start_time, end_time, 'active', 'adhoc'
+  insert into shift_instances (resort_id, date, shift_type_id, shift_key, name, sort_order, start_time, end_time, required_drivers, status, origin)
+  select resort_id, '2027-03-03', v_extra_shift_type_id, shift_key || '_extra', name, sort_order, start_time, end_time, required_drivers, 'active', 'adhoc'
   from shift_instances where shift_type_id = current_setting('dbtest.avail_shift_type')::uuid and date = '2027-03-01';
 
   perform pg_temp.expect_true('stale confirmation: adding a new active shift reopens the week (shift_added)',
@@ -192,15 +192,18 @@ begin
   perform confirm_availability_week(current_setting('dbtest.driver_a_id')::uuid, current_setting('dbtest.avail_week_start')::date);
 end $$;
 
--- pay/staffing/high-value changes do not reopen availability.
+-- staffing/high-value changes do not reopen availability. (Pay is no
+-- longer a shift_instances column at all -- Stage 2D Payroll Checkpoint A --
+-- so it can no longer be part of this scenario; staffing/high-value alone
+-- still fully exercises the invariant.)
 do $$
 declare
   v_id uuid;
 begin
   select id into v_id from shift_instances where shift_type_id = current_setting('dbtest.avail_shift_type')::uuid and date = '2027-03-01';
-  update shift_instances set required_drivers = 5, base_pay_chf = 999, delivery_rate_chf = 50, is_premium = true where id = v_id;
+  update shift_instances set required_drivers = 5, is_premium = true where id = v_id;
 
-  perform pg_temp.expect_true('stale confirmation: pay/staffing/high-value changes do NOT reopen the week',
+  perform pg_temp.expect_true('stale confirmation: staffing/high-value changes do NOT reopen the week',
     (select submitted_at is not null from availability_submissions where driver_id = current_setting('dbtest.driver_a_id')::uuid and week_start = current_setting('dbtest.avail_week_start')::date));
 end $$;
 
@@ -292,3 +295,75 @@ begin
   perform pg_temp.expect_equal('week_availability_status: answered_count is recomputed from real availability rows, not the forced submission',
     v_status.answered_count, 0);
 end $$;
+
+-- ---------------------------------------------------------------------
+-- Stage 3: direct-table identity/uniqueness/manager-visibility invariants
+-- that the new manager availability-summary/detail repository methods
+-- (listAvailabilitySubmissionStatus/getResortWeekAvailability) depend on --
+-- both are plain authorized reads over these same tables, no new RPC.
+-- ---------------------------------------------------------------------
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
+do $$
+declare
+  v_driver_a2_id uuid;
+begin
+  insert into drivers (resort_id, full_name) values (current_setting('dbtest.resort_a')::uuid, 'DB Test Driver A2 (Availability)')
+  returning id into v_driver_a2_id;
+  perform set_config('dbtest.avail_driver_a2_id', v_driver_a2_id::text, false);
+end $$;
+
+-- One row per (driver, shift_instance): the real unique constraint behind
+-- setAvailability's upsert -- a direct duplicate insert is rejected.
+select pg_temp.expect_error('availability: a second row for the same (driver, shift_instance) is rejected (23505)',
+  format('insert into availability (driver_id, resort_id, shift_instance_id, status) values (%L, %L, %L, %L)',
+    current_setting('dbtest.driver_a_id'), current_setting('dbtest.resort_a'),
+    (string_to_array(current_setting('dbtest.avail_shift_ids'), ','))[1], 'unavailable'),
+  '23505');
+
+-- Cross-driver write: driver_a cannot insert/claim an availability row on
+-- behalf of driver_a2, even for their own shared resort (RLS WITH CHECK
+-- requires driver_id = current_driver_id()).
+select pg_temp.act_as('authenticated', current_setting('dbtest.driver_a_user_id')::uuid);
+do $$
+declare
+  v_before int;
+  v_after int;
+begin
+  select count(*) into v_before from availability where driver_id = current_setting('dbtest.avail_driver_a2_id')::uuid;
+  -- RLS WITH CHECK failures on INSERT raise, rather than silently filtering
+  -- (unlike UPDATE/SELECT, which filter via USING) -- expect a hard error.
+  begin
+    insert into availability (driver_id, resort_id, shift_instance_id, status)
+    values (current_setting('dbtest.avail_driver_a2_id')::uuid, current_setting('dbtest.resort_a')::uuid,
+      (string_to_array(current_setting('dbtest.avail_shift_ids'), ','))[4]::uuid, 'available');
+    perform pg_temp.expect_true('availability: driver_a impersonating driver_a2 on insert should have raised (did not)', false);
+  exception when insufficient_privilege then
+    perform pg_temp.expect_true('availability: driver_a cannot insert an availability row for driver_a2 (RLS WITH CHECK, 42501)', true);
+  end;
+  select count(*) into v_after from availability where driver_id = current_setting('dbtest.avail_driver_a2_id')::uuid;
+  perform pg_temp.expect_equal('availability: the blocked impersonation attempt left no row behind', v_after, v_before);
+end $$;
+
+-- Cross-driver read: driver_a cannot see driver_a2's availability rows,
+-- even though they share a resort.
+select pg_temp.as_postgres();
+do $$
+begin
+  insert into availability (driver_id, resort_id, shift_instance_id, status)
+  values (current_setting('dbtest.avail_driver_a2_id')::uuid, current_setting('dbtest.resort_a')::uuid,
+    (string_to_array(current_setting('dbtest.avail_shift_ids'), ','))[4]::uuid, 'available');
+end $$;
+select pg_temp.act_as('authenticated', current_setting('dbtest.driver_a_user_id')::uuid);
+select pg_temp.expect_true('availability: driver_a cannot see driver_a2''s availability rows (RLS SELECT, same resort)',
+  (select count(*) from availability where driver_id = current_setting('dbtest.avail_driver_a2_id')::uuid) = 0);
+
+-- Manager visibility: the new manager-facing availability repository
+-- methods depend on a manager being able to read every driver's rows at a
+-- resort directly (availability_manager_all / availability_submissions_
+-- manager_select) -- confirmed here rather than assumed.
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
+select pg_temp.expect_true('availability: manager sees both driver_a''s and driver_a2''s rows at resort_a',
+  (select count(distinct driver_id) from availability where resort_id = current_setting('dbtest.resort_a')::uuid
+    and driver_id in (current_setting('dbtest.driver_a_id')::uuid, current_setting('dbtest.avail_driver_a2_id')::uuid)) = 2);
+select pg_temp.expect_true('availability_submissions: manager can read driver_a''s submission row directly',
+  exists (select 1 from availability_submissions where driver_id = current_setting('dbtest.driver_a_id')::uuid));

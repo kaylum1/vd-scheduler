@@ -9,7 +9,9 @@ import type {
   ApplyTemplateCancellationResult,
   ApplyTemplateRefreshResult,
   AvailabilityAnswer,
+  AvailabilitySubmissionRecord,
   ConfirmWeekOutcome,
+  DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
   DriverRecord,
   DriverVisibleAssignment,
@@ -17,6 +19,7 @@ import type {
   MaterialiseShiftsResult,
   ReopenWeekOutcome,
   ResortRecord,
+  ShiftBasePayRuleRecord,
   ShiftInstanceRecord,
   ShiftTemplateRecord,
   ShiftTypeRecord,
@@ -28,6 +31,10 @@ import type {
 } from '../domain';
 
 type ResortRow = Database['public']['Tables']['resorts']['Row'];
+type CreateResortRow = Database['public']['Functions']['create_resort']['Returns'][number];
+// deactivate_resort/reactivate_resort both return the same single
+// { resort_id } shape -- one shared row type/mapper for both.
+type ResortMutationRow = { resort_id: string };
 type DriverRow = Database['public']['Tables']['drivers']['Row'];
 type SupportedLanguageRow = Database['public']['Tables']['supported_languages']['Row'];
 type DriverOnfleetMappingRow = Database['public']['Tables']['driver_onfleet_mappings']['Row'];
@@ -35,6 +42,7 @@ type ShiftTypeRow = Database['public']['Tables']['shift_types']['Row'];
 type ShiftTemplateRow = Database['public']['Tables']['shift_templates']['Row'];
 type ShiftInstanceRow = Database['public']['Tables']['shift_instances']['Row'];
 type AvailabilityRow = Database['public']['Tables']['availability']['Row'];
+type AvailabilitySubmissionRow = Database['public']['Tables']['availability_submissions']['Row'];
 type DriverVisibleShiftRow = Database['public']['Views']['driver_visible_shifts']['Row'];
 type DriverVisibleAssignmentRow = Database['public']['Views']['driver_visible_assignments']['Row'];
 type WeekAvailabilityStatusRow = Database['public']['Functions']['week_availability_status']['Returns'][number];
@@ -44,7 +52,17 @@ type MaterialiseShiftsRow = Database['public']['Functions']['materialise_shift_i
 type TemplateRefreshPreviewDbRow = Database['public']['Functions']['preview_template_refresh']['Returns'][number];
 type ApplyTemplateRefreshRow = Database['public']['Functions']['apply_template_refresh']['Returns'][number];
 type TemplateCancellationPreviewDbRow = Database['public']['Functions']['preview_template_cancellation']['Returns'][number];
+type ShiftBasePayRuleRow = Database['public']['Tables']['shift_base_pay_rules']['Row'];
+type SetShiftBasePayRateRow = Database['public']['Functions']['set_shift_base_pay_rate']['Returns'][number];
+type DriverDeliveryRateRow = Database['public']['Tables']['driver_delivery_rates']['Row'];
+type SetDriverDeliveryRateRow = Database['public']['Functions']['set_driver_delivery_rate']['Returns'][number];
+type CorrectShiftBasePayRateRow = Database['public']['Functions']['correct_shift_base_pay_rate']['Returns'][number];
+type CorrectDriverDeliveryRateRow = Database['public']['Functions']['correct_driver_delivery_rate']['Returns'][number];
 type ApplyTemplateCancellationRow = Database['public']['Functions']['apply_template_cancellation']['Returns'][number];
+type CreateShiftRow = Database['public']['Functions']['create_shift']['Returns'][number];
+// revise_shift/deactivate_shift/reactivate_shift all return the same single
+// { shift_type_id } shape -- one shared row type/mapper for all three.
+type ShiftMutationRow = { shift_type_id: string };
 
 export function mapResort(row: ResortRow): ResortRecord {
   return {
@@ -54,6 +72,16 @@ export function mapResort(row: ResortRow): ResortRecord {
     timezone: row.timezone,
     isActive: row.is_active,
   };
+}
+
+/** create_resort's row also carries the auto-generated slug -- never surfaced to the manager, kept here only in case a caller ever needs it for logging/debugging. */
+export function mapCreateResortResult(row: CreateResortRow): { resortId: string; slug: string } {
+  return { resortId: row.resort_id, slug: row.slug };
+}
+
+/** Shared by deactivate_resort/reactivate_resort -- both return just the resort id. */
+export function mapResortMutationResult(row: ResortMutationRow): { resortId: string } {
+  return { resortId: row.resort_id };
 }
 
 export function mapDriver(row: DriverRow): DriverRecord {
@@ -109,7 +137,18 @@ export function mapShiftTemplate(row: ShiftTemplateRow): ShiftTemplateRecord {
     effectiveFrom: row.effective_from,
     effectiveTo: row.effective_to,
     isActive: row.is_active,
+    updatedAt: row.updated_at,
   };
+}
+
+/** create_shift's row also carries the auto-generated internal key -- never surfaced to the manager, kept here only in case a caller ever needs it for logging/debugging. */
+export function mapCreateShiftResult(row: CreateShiftRow): { shiftTypeId: string; key: string } {
+  return { shiftTypeId: row.shift_type_id, key: row.key };
+}
+
+/** Shared by revise_shift/deactivate_shift/reactivate_shift -- all three return just the stable shift_type_id. */
+export function mapShiftMutationResult(row: ShiftMutationRow): { shiftTypeId: string } {
+  return { shiftTypeId: row.shift_type_id };
 }
 
 export function mapShiftInstance(row: ShiftInstanceRow): ShiftInstanceRecord {
@@ -129,8 +168,6 @@ export function mapShiftInstance(row: ShiftInstanceRow): ShiftInstanceRecord {
     startTime: row.start_time,
     endTime: row.end_time,
     requiredDrivers: row.required_drivers,
-    basePayChf: row.base_pay_chf,
-    deliveryRateChf: row.delivery_rate_chf,
     isPremium: row.is_premium,
     // status/origin are CHECK-constrained at the DB level (migration 06)
     // but the generator can't see CHECK constraints, only the base `text`
@@ -181,6 +218,17 @@ export function mapAvailability(row: AvailabilityRow): AvailabilityAnswer {
   };
 }
 
+export function mapAvailabilitySubmission(row: AvailabilitySubmissionRow): AvailabilitySubmissionRecord {
+  return {
+    driverId: row.driver_id,
+    resortId: row.resort_id,
+    weekStart: row.week_start,
+    submittedAt: row.submitted_at,
+    reopenedAt: row.reopened_at,
+    reopenedReason: row.reopened_reason,
+  };
+}
+
 export function mapWeekAvailabilityStatus(row: WeekAvailabilityStatusRow): WeekAvailabilityStatus {
   return {
     state: row.state,
@@ -221,8 +269,6 @@ export function mapMaterialiseShiftsResult(row: MaterialiseShiftsRow): Materiali
     skippedExistingCount: row.skipped_existing_count,
     fromDate: row.from_date,
     toDate: row.to_date,
-    missingPayrollRuleCount: row.missing_payroll_rule_count,
-    missingRotaRuleCount: row.missing_rota_rule_count,
   };
 }
 
@@ -268,5 +314,73 @@ export function mapApplyTemplateCancellationResult(row: ApplyTemplateCancellatio
   return {
     cancelledCount: row.cancelled_count,
     cancelledShiftInstanceIds: row.cancelled_shift_instance_ids ?? [],
+  };
+}
+
+export function mapShiftBasePayRule(row: ShiftBasePayRuleRow): ShiftBasePayRuleRecord {
+  return {
+    id: row.id,
+    resortId: row.resort_id,
+    shiftTypeId: row.shift_type_id,
+    basePayChf: row.base_pay_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+export function mapSetShiftBasePayRateResult(row: SetShiftBasePayRateRow): ShiftBasePayRuleRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    shiftTypeId: row.shift_type_id,
+    basePayChf: row.base_pay_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+export function mapDriverDeliveryRate(row: DriverDeliveryRateRow): DriverDeliveryRateRecord {
+  return {
+    id: row.id,
+    resortId: row.resort_id,
+    driverId: row.driver_id,
+    rateChf: row.rate_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+export function mapSetDriverDeliveryRateResult(row: SetDriverDeliveryRateRow): DriverDeliveryRateRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    driverId: row.driver_id,
+    rateChf: row.rate_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+/** Stage 2D Payroll Checkpoint B.1 -- correct_shift_base_pay_rate returns the identical row shape as set_shift_base_pay_rate. */
+export function mapCorrectShiftBasePayRateResult(row: CorrectShiftBasePayRateRow): ShiftBasePayRuleRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    shiftTypeId: row.shift_type_id,
+    basePayChf: row.base_pay_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
+  };
+}
+
+/** Stage 2D Payroll Checkpoint B.1 -- correct_driver_delivery_rate returns the identical row shape as set_driver_delivery_rate. */
+export function mapCorrectDriverDeliveryRateResult(row: CorrectDriverDeliveryRateRow): DriverDeliveryRateRecord {
+  return {
+    id: row.rule_id,
+    resortId: row.resort_id,
+    driverId: row.driver_id,
+    rateChf: row.rate_chf,
+    effectiveFrom: row.effective_from,
+    effectiveTo: row.effective_to,
   };
 }

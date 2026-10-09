@@ -329,6 +329,50 @@ export type Database = {
           },
         ]
       }
+      driver_delivery_rates: {
+        Row: {
+          created_at: string
+          driver_id: string
+          effective_from: string
+          effective_to: string | null
+          id: string
+          is_active: boolean
+          rate_chf: number
+          resort_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          driver_id: string
+          effective_from: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          rate_chf: number
+          resort_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          driver_id?: string
+          effective_from?: string
+          effective_to?: string | null
+          id?: string
+          is_active?: boolean
+          rate_chf?: number
+          resort_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_delivery_rates_driver_resort_fk"
+            columns: ["driver_id", "resort_id"]
+            isOneToOne: false
+            referencedRelation: "drivers"
+            referencedColumns: ["id", "resort_id"]
+          },
+        ]
+      }
       driver_onfleet_mappings: {
         Row: {
           created_at: string
@@ -510,53 +554,6 @@ export type Database = {
           },
         ]
       }
-      payroll_rules: {
-        Row: {
-          base_pay_chf: number
-          created_at: string
-          delivery_rate_chf: number
-          effective_from: string
-          effective_to: string | null
-          id: string
-          is_active: boolean
-          resort_id: string
-          shift_type_id: string
-          updated_at: string
-        }
-        Insert: {
-          base_pay_chf: number
-          created_at?: string
-          delivery_rate_chf: number
-          effective_from: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          resort_id: string
-          shift_type_id: string
-          updated_at?: string
-        }
-        Update: {
-          base_pay_chf?: number
-          created_at?: string
-          delivery_rate_chf?: number
-          effective_from?: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          resort_id?: string
-          shift_type_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "payroll_rules_shift_type_resort_fk"
-            columns: ["shift_type_id", "resort_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id", "resort_id"]
-          },
-        ]
-      }
       resorts: {
         Row: {
           created_at: string
@@ -717,140 +714,43 @@ export type Database = {
           },
         ]
       }
-      rota_rules_date: {
+      shift_base_pay_rules: {
         Row: {
-          created_at: string
-          id: string
-          is_active: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          specific_date: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          specific_date: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          is_active?: boolean
-          is_premium?: boolean
-          required_drivers?: number
-          resort_id?: string
-          shift_type_id?: string
-          specific_date?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "rota_rules_date_shift_type_resort_fk"
-            columns: ["shift_type_id", "resort_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id", "resort_id"]
-          },
-        ]
-      }
-      rota_rules_default: {
-        Row: {
+          base_pay_chf: number
           created_at: string
           effective_from: string
           effective_to: string | null
           id: string
           is_active: boolean
-          is_premium: boolean
-          required_drivers: number
           resort_id: string
           shift_type_id: string
           updated_at: string
         }
         Insert: {
+          base_pay_chf: number
           created_at?: string
           effective_from: string
           effective_to?: string | null
           id?: string
           is_active?: boolean
-          is_premium: boolean
-          required_drivers: number
           resort_id: string
           shift_type_id: string
           updated_at?: string
         }
         Update: {
+          base_pay_chf?: number
           created_at?: string
           effective_from?: string
           effective_to?: string | null
           id?: string
           is_active?: boolean
-          is_premium?: boolean
-          required_drivers?: number
           resort_id?: string
           shift_type_id?: string
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "rota_rules_default_shift_type_resort_fk"
-            columns: ["shift_type_id", "resort_id"]
-            isOneToOne: false
-            referencedRelation: "shift_types"
-            referencedColumns: ["id", "resort_id"]
-          },
-        ]
-      }
-      rota_rules_weekday: {
-        Row: {
-          created_at: string
-          effective_from: string
-          effective_to: string | null
-          id: string
-          is_active: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          updated_at: string
-          weekday: number
-        }
-        Insert: {
-          created_at?: string
-          effective_from: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          is_premium: boolean
-          required_drivers: number
-          resort_id: string
-          shift_type_id: string
-          updated_at?: string
-          weekday: number
-        }
-        Update: {
-          created_at?: string
-          effective_from?: string
-          effective_to?: string | null
-          id?: string
-          is_active?: boolean
-          is_premium?: boolean
-          required_drivers?: number
-          resort_id?: string
-          shift_type_id?: string
-          updated_at?: string
-          weekday?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "rota_rules_weekday_shift_type_resort_fk"
+            foreignKeyName: "shift_base_pay_rules_shift_type_resort_fk"
             columns: ["shift_type_id", "resort_id"]
             isOneToOne: false
             referencedRelation: "shift_types"
@@ -860,19 +760,17 @@ export type Database = {
       }
       shift_instances: {
         Row: {
-          base_pay_chf: number | null
           cancelled_at: string | null
           cancelled_by: string | null
           cancelled_reason: string | null
           created_at: string
           date: string
-          delivery_rate_chf: number | null
           end_time: string
           id: string
           is_premium: boolean | null
           name: string
           origin: string
-          required_drivers: number | null
+          required_drivers: number
           resort_id: string
           shift_key: string
           shift_type_id: string
@@ -884,19 +782,17 @@ export type Database = {
           week_start: string | null
         }
         Insert: {
-          base_pay_chf?: number | null
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
           created_at?: string
           date: string
-          delivery_rate_chf?: number | null
           end_time: string
           id?: string
           is_premium?: boolean | null
           name: string
           origin: string
-          required_drivers?: number | null
+          required_drivers: number
           resort_id: string
           shift_key: string
           shift_type_id: string
@@ -908,19 +804,17 @@ export type Database = {
           week_start?: string | null
         }
         Update: {
-          base_pay_chf?: number | null
           cancelled_at?: string | null
           cancelled_by?: string | null
           cancelled_reason?: string | null
           created_at?: string
           date?: string
-          delivery_rate_chf?: number | null
           end_time?: string
           id?: string
           is_premium?: boolean | null
           name?: string
           origin?: string
-          required_drivers?: number | null
+          required_drivers?: number
           resort_id?: string
           shift_key?: string
           shift_type_id?: string
@@ -973,7 +867,7 @@ export type Database = {
           id: string
           is_active: boolean
           is_premium: boolean | null
-          required_drivers: number | null
+          required_drivers: number
           resort_id: string
           shift_type_id: string
           start_time: string
@@ -990,7 +884,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_premium?: boolean | null
-          required_drivers?: number | null
+          required_drivers: number
           resort_id: string
           shift_type_id: string
           start_time: string
@@ -1007,7 +901,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_premium?: boolean | null
-          required_drivers?: number | null
+          required_drivers?: number
           resort_id?: string
           shift_type_id?: string
           start_time?: string
@@ -1171,6 +1065,7 @@ export type Database = {
         Row: {
           current_end_time: string | null
           current_name: string | null
+          current_required_drivers: number | null
           current_sort_order: number | null
           current_start_time: string | null
           current_template_id: string | null
@@ -1178,6 +1073,7 @@ export type Database = {
           governing_template_id: string | null
           new_end_time: string | null
           new_name: string | null
+          new_required_drivers: number | null
           new_sort_order: number | null
           new_start_time: string | null
           resort_id: string | null
@@ -1217,6 +1113,7 @@ export type Database = {
           p_effective_from: string
           p_effective_to?: string
           p_end_time: string
+          p_required_drivers: number
           p_resort_id: string
           p_shift_type_id: string
           p_start_time: string
@@ -1256,12 +1153,47 @@ export type Database = {
           week_start: string
         }[]
       }
+      correct_driver_delivery_rate: {
+        Args: { p_driver_id: string; p_new_rate_chf: number; p_rule_id: string }
+        Returns: {
+          driver_id: string
+          effective_from: string
+          effective_to: string
+          rate_chf: number
+          resort_id: string
+          rule_id: string
+        }[]
+      }
+      correct_shift_base_pay_rate: {
+        Args: {
+          p_new_base_pay_chf: number
+          p_resort_id: string
+          p_rule_id: string
+          p_shift_type_id: string
+        }
+        Returns: {
+          base_pay_chf: number
+          effective_from: string
+          effective_to: string
+          resort_id: string
+          rule_id: string
+          shift_type_id: string
+        }[]
+      }
+      create_resort: {
+        Args: { p_name: string }
+        Returns: {
+          resort_id: string
+          slug: string
+        }[]
+      }
       create_shift: {
         Args: {
           p_effective_from?: string
           p_effective_to?: string
           p_end_time: string
           p_name: string
+          p_required_drivers: number
           p_resort_id: string
           p_start_time: string
           p_weekdays: number[]
@@ -1283,6 +1215,12 @@ export type Database = {
       }
       current_driver_id: { Args: never; Returns: string }
       current_driver_resort_id: { Args: never; Returns: string }
+      deactivate_resort: {
+        Args: { p_resort_id: string }
+        Returns: {
+          resort_id: string
+        }[]
+      }
       deactivate_shift: {
         Args: {
           p_effective_to?: string
@@ -1301,8 +1239,6 @@ export type Database = {
         Returns: {
           created_count: number
           from_date: string
-          missing_payroll_rule_count: number
-          missing_rota_rule_count: number
           skipped_existing_count: number
           to_date: string
         }[]
@@ -1342,11 +1278,18 @@ export type Database = {
           will_change: boolean
         }[]
       }
+      reactivate_resort: {
+        Args: { p_resort_id: string }
+        Returns: {
+          resort_id: string
+        }[]
+      }
       reactivate_shift: {
         Args: {
           p_effective_from?: string
           p_effective_to?: string
           p_end_time: string
+          p_required_drivers: number
           p_resort_id: string
           p_shift_type_id: string
           p_start_time: string
@@ -1376,6 +1319,7 @@ export type Database = {
           p_effective_to?: string
           p_end_time: string
           p_name: string
+          p_required_drivers: number
           p_resort_id: string
           p_shift_type_id: string
           p_start_time: string
@@ -1383,6 +1327,21 @@ export type Database = {
         }
         Returns: {
           shift_type_id: string
+        }[]
+      }
+      set_driver_delivery_rate: {
+        Args: {
+          p_driver_id: string
+          p_effective_from?: string
+          p_rate_chf: number
+        }
+        Returns: {
+          driver_id: string
+          effective_from: string
+          effective_to: string
+          rate_chf: number
+          resort_id: string
+          rule_id: string
         }[]
       }
       set_driver_onfleet_mapping: {
@@ -1402,6 +1361,22 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      set_shift_base_pay_rate: {
+        Args: {
+          p_base_pay_chf: number
+          p_effective_from?: string
+          p_resort_id: string
+          p_shift_type_id: string
+        }
+        Returns: {
+          base_pay_chf: number
+          effective_from: string
+          effective_to: string
+          resort_id: string
+          rule_id: string
+          shift_type_id: string
+        }[]
       }
       shift_instance_week_is_published: {
         Args: { p_shift_instance_id: string }

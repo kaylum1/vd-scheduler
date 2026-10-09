@@ -8,14 +8,38 @@ import { RepositoryError } from '../../../repositories/errors';
  * parsing message text, so mock and Supabase mode show the same wording.
  * Falls back to RepositoryError.userMessage (already safe/generic) for
  * anything unmatched — never renders a raw Postgres/PostgREST message.
+ *
+ * The 'shift' context (Stage 2D Checkpoint 4) is the one exception to
+ * "never parse message text": create_shift/revise_shift/deactivate_shift/
+ * reactivate_shift raise several distinct business-rule violations that
+ * all share SQLSTATE 23514 (no other signal distinguishes them), and their
+ * exact message text is first-party, stable copy this project authored in
+ * the same migration this file is maintained alongside — not an opaque
+ * Postgres/constraint-name string. Matching on it here is what lets each
+ * one map to its own precise, still-never-raw manager-facing sentence.
+ * The 'resort' context (Stage 2D Checkpoint 4.1) follows the same idiom,
+ * plus one addition: deactivate_resort's 55006 message is itself already
+ * manager-facing, dynamic, first-party copy (it names exactly which
+ * dependents are blocking) -- passed through as-is rather than replaced
+ * with a generic sentence that would lose that detail.
  */
 export function describeConfigurationError(
   error: unknown,
-  context: 'driver' | 'shiftType' | 'shiftTemplate',
+  context: 'driver' | 'shiftType' | 'shiftTemplate' | 'shift' | 'resort' | 'payrollRule',
   detail?: { shiftTypeName?: string; weekdayLabel?: string }
 ): string {
   if (!(error instanceof RepositoryError)) {
     return 'Something went wrong. Please try again.';
+  }
+
+  if (context === 'shift') {
+    return describeShiftError(error, detail);
+  }
+  if (context === 'resort') {
+    return describeResortError(error);
+  }
+  if (context === 'payrollRule') {
+    return describePayrollRuleError(error);
   }
 
   switch (error.code) {
@@ -47,6 +71,94 @@ export function describeConfigurationError(
     case '42501': // insufficient_privilege (RLS rejection)
       return error.userMessage;
     case 'mock_unsupported': // materialise/refresh/cancellation RPCs — mock mode has no real equivalent, never faked
+      return 'This action needs Supabase mode (VITE_DATA_PROVIDER=supabase) — not available in this mock demo.';
+    default:
+      return error.userMessage;
+  }
+}
+
+/** describeConfigurationError's 'shift' branch — see its doc comment for why message text is matched here. */
+function describeShiftError(error: RepositoryError, detail?: { shiftTypeName?: string; weekdayLabel?: string }): string {
+  const raw = error.message;
+
+  switch (error.code) {
+    case '23514':
+      if (/needs a name/i.test(raw)) return 'Give this shift a name.';
+      if (/at least one day/i.test(raw)) return 'Select at least one day of the week.';
+      if (/end time must be after/i.test(raw)) return 'End time must be after the start time.';
+      if (/already active/i.test(raw)) return 'This shift is already active.';
+      if (/effective_to|effective range|must not be after/i.test(raw)) return 'The end date must be on or after the start date.';
+      return 'Check the shift details and try again.';
+    case '55006': // reused here for "must be reactivated before it can be revised"
+      return 'This shift is inactive. Reactivate it before making changes.';
+    case 'P0002': // no_data_found — the shift record itself couldn't be found
+      return 'This shift could not be found. It may have changed elsewhere — refresh and try again.';
+    case '23P01': // exclusion_violation — should not normally occur through these RPCs, kept as a safe fallback
+      return `There is already a ${detail?.shiftTypeName ?? 'shift'} schedule covering ${detail?.weekdayLabel ?? 'this day'} for these dates.`;
+    case '23503':
+      return 'That resort is no longer valid. Refresh and try again.';
+    case '42501':
+      return error.userMessage;
+    case 'mock_unsupported':
+      return 'This action needs Supabase mode (VITE_DATA_PROVIDER=supabase) — not available in this mock demo.';
+    default:
+      return error.userMessage;
+  }
+}
+
+/** Strips unwrap()'s "<operation> failed: " prefix (Supabase path only -- the mock repositories throw the bare message directly), so both providers show identical, exact copy for messages meant to be passed through verbatim. */
+function stripOperationPrefix(message: string): string {
+  return message.replace(/^[\w.]+ failed:\s*/, '');
+}
+
+/** describeConfigurationError's 'resort' branch — see its doc comment for why the 55006 message is passed through rather than replaced. */
+function describeResortError(error: RepositoryError): string {
+  switch (error.code) {
+    case '23514': // create_resort: blank name
+      return 'Give this resort a name.';
+    case 'P0002': // no_data_found — the resort record itself couldn't be found
+      return 'This resort could not be found. It may have changed elsewhere — refresh and try again.';
+    case '55006': // object_in_use — deactivate_resort blocked by active dependents; message already names them
+      return stripOperationPrefix(error.message);
+    case '42501':
+      return error.userMessage;
+    case 'mock_unsupported':
+      return 'This action needs Supabase mode (VITE_DATA_PROVIDER=supabase) — not available in this mock demo.';
+    default:
+      return error.userMessage;
+  }
+}
+
+/**
+ * describeConfigurationError's 'payrollRule' branch (Stage 2D Payroll
+ * Checkpoint B). Like 'shift'/'resort', 23514 covers several distinct
+ * first-party business-rule messages this project authored in the same
+ * migration this file is maintained alongside — matched on text, never a
+ * raw Postgres/PostgREST message.
+ */
+function describePayrollRuleError(error: RepositoryError): string {
+  const raw = error.message;
+
+  switch (error.code) {
+    case '23514':
+      if (/already took effect/i.test(raw)) {
+        return "That date is before the current rate's own start. Choose a later date, or edit the rate that's already scheduled for that period.";
+      }
+      return 'Enter an amount of CHF 0 or more.';
+    case '23P01': // exclusion_violation — should not normally surface through these RPCs, kept as a safe fallback
+      return 'That date overlaps a rate that already applies for this period. Choose a different date.';
+    case '23503': // foreign_key_violation — set_shift_base_pay_rate: shift/resort mismatch
+      return 'That Shift is no longer valid for this resort. Refresh and try again.';
+    case 'P0002': // no_data_found — either "driver not found" (set_driver_delivery_rate) or "rate not found" (correct_*); disambiguate on text.
+      if (/rate could not be found/i.test(raw)) {
+        return 'This rate could not be found. It may have changed elsewhere — refresh and try again.';
+      }
+      return 'This driver could not be found. It may have changed elsewhere — refresh and try again.';
+    case '55006': // object_in_use — correct_*: target period has already closed (Stage 2D Payroll Checkpoint B.1)
+      return 'This rate has already changed since you opened this form — refresh and try again.';
+    case '42501':
+      return error.userMessage;
+    case 'mock_unsupported':
       return 'This action needs Supabase mode (VITE_DATA_PROVIDER=supabase) — not available in this mock demo.';
     default:
       return error.userMessage;

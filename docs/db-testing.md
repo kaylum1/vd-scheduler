@@ -63,19 +63,38 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | File | Covers |
 |---|---|
 | `00_core_schema.sql` | Weekday convention, resort/driver/app_user identity rules, cross-resort composite FKs, stable shift identity, immutability/overlap guards |
-| `10_availability_publication.sql` | Availability answers, Confirm/Reopen Week, stale-confirmation invalidation, publication locking, `week_availability_status` authority |
+| `10_availability_publication.sql` | Availability answers, Confirm/Reopen Week, stale-confirmation invalidation, publication locking, `week_availability_status` authority, direct-table identity/uniqueness/manager-visibility invariants (Stage 3) |
 | `20_assignments_attendance_adjustments.sql` | Rota assignments, attendance, payroll adjustments (types, positivity, voiding) |
 | `30_security_rls_audit.sql` | Anonymous/driver/manager RLS boundaries, RPC caller authorization, audit logging |
 | `35_driver_safe_views.sql` | `driver_visible_shifts` / `driver_visible_assignments` — the driver-facing security boundary views |
 | `40_materialisation_template_safety.sql` | Insert-only + idempotent materialisation, effective template selection, override/adhoc/published/attendance refresh protection, cancellation preview/apply, operational timezone + DST |
 | `50_language_onfleet.sql` | `preferred_language`, Onfleet mapping uniqueness/atomicity |
-| `60_payroll_rota_rules.sql` | `payroll_rules`/`rota_rules_*` effective dating, precedence (date > weekday > default), missing-config behaviour (Stage 2D Checkpoint 3) |
+| `60_shift_staffing.sql` | `required_drivers` mandatory on `shift_templates`/`create_shift`/`revise_shift`/`reactivate_shift`, two separately-named Shifts with different staffing and no overlap conflict, direct materialisation (no rota-rule join), history preservation across a staffing revision, and proof the old `rota_rules_*` tables/counts are gone entirely (Stage 2D staffing simplification, replacing the abandoned Checkpoint 3 Rota Rules design) |
 | `70_atomic_shift_rpcs.sql` | `create_shift`/`revise_shift`/`deactivate_shift`/`reactivate_shift` atomicity, history preservation, security, audit (Stage 2D Checkpoint 3) |
+| `80_resort_lifecycle.sql` | `create_resort`/`deactivate_resort`/`reactivate_resort` atomicity, dependency-blocked deactivation, history preservation, security, audit (Stage 2D Checkpoint 4.1) |
+| `90_payroll_rate_foundations.sql` | `shift_base_pay_rules`/`driver_delivery_rates` effective dating, overlap prevention, historical-safe resolution, security, audit (Stage 2D Payroll Checkpoint A) |
+| `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
+| `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of Stage 2D Checkpoint 3.1 this suite has **192 assertions**. That
-number will keep changing as the suite grows — don't chase a specific
-count; the point is that it stays genuinely comprehensive and, unlike its
-scratchpad predecessor, that it survives.
+As of the pre-Manual-Rota cleanup checkpoint this suite has **320
+assertions**. That number will keep changing as the suite grows — don't
+chase a specific count; the point is that it stays genuinely comprehensive
+and, unlike its scratchpad predecessor, that it survives.
+
+## Deployment readiness (pre-launch, local-only today)
+
+This project has no linked hosted Supabase project, no staging/production
+database, and no CI/CD deployment workflow — every migration is only ever
+applied via a full local `supabase db reset`. Some migrations rely on this:
+notably `20260916090000_simplify_shift_staffing.sql` makes
+`shift_templates.required_drivers`/`shift_instances.required_drivers`
+`NOT NULL` with no backfill, which only works against an empty database.
+
+**Before introducing the first persistent hosted Supabase environment**, the
+full migration history must get a deployment-readiness review (backfills for
+any NOT-NULL-without-default changes, idempotency under `supabase migration
+up` rather than `db reset`) — do not assume any migration in this history is
+safe to apply incrementally against existing data until that review happens.
 
 ## Adding a new group
 

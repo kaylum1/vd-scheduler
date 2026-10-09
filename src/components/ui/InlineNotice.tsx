@@ -1,7 +1,7 @@
 import React from 'react';
 import { IconX } from './icons';
 
-export type NoticeTone = 'info' | 'success' | 'error';
+export type NoticeTone = 'info' | 'success' | 'warning' | 'error';
 
 /** Compact dismissible banner — form-level errors, post-action confirmations. */
 export function InlineNotice({

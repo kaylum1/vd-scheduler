@@ -24,18 +24,22 @@ import type {
   ApplyTemplateCancellationResult,
   ApplyTemplateRefreshResult,
   AvailabilityAnswer,
+  AvailabilitySubmissionRecord,
+  AvailabilitySubmissionSummary,
   AvailabilityStatus,
   ConfirmWeekOutcome,
+  DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
   DriverRecord,
+  DriverShiftAvailability,
   DriverVisibleAssignment,
   DriverVisibleShift,
   MaterialiseShiftsResult,
   ReopenWeekOutcome,
   ResortRecord,
+  ShiftBasePayRuleRecord,
   ShiftInstanceRecord,
-  ShiftTemplateRecord,
-  ShiftTypeRecord,
+  ShiftRecord,
   SupportedLanguageRecord,
   TemplateCancellationPreviewRow,
   TemplateRefreshPreviewRow,
@@ -43,8 +47,27 @@ import type {
 } from './domain';
 
 export interface ResortRepository {
+  /** Every resort, active and inactive alike -- callers decide what to show where (Stage 2D Checkpoint 4.1 §5: operational selectors filter to active themselves; management/reporting views want everything). */
   listResorts(): Promise<ResortRecord[]>;
   getResortById(resortId: string): Promise<ResortRecord | null>;
+
+  /**
+   * Atomic (create_resort). The internal `slug` is generated server-side
+   * from the name (disambiguated on collision) -- the manager never sees
+   * or supplies it. No timezone input: the column's own default
+   * (Europe/Zurich) applies untouched.
+   */
+  createResort(name: string): Promise<{ resortId: string; slug: string }>;
+  /**
+   * Atomic (deactivate_resort). Never deletes the row and never cascades
+   * to its drivers/shifts/instances/publications -- rejected if the
+   * resort still has any operationally-active dependent (active drivers,
+   * active shifts, upcoming generated shift instances, a published week),
+   * surfaced as a manager-facing error naming what's blocking it.
+   */
+  deactivateResort(resortId: string): Promise<{ resortId: string }>;
+  /** Atomic (reactivate_resort). Restores the same row -- same id, same slug, same historical relationships. Never creates a replacement resort. */
+  reactivateResort(resortId: string): Promise<{ resortId: string }>;
 }
 
 export interface DriverRepository {
@@ -91,61 +114,82 @@ export interface DriverRepository {
   setOnfleetMapping(driverId: string, onfleetWorkerId: string): Promise<DriverOnfleetMappingRecord>;
 }
 
+/**
+ * Fields for create_shift/revise_shift/reactivate_shift's manager-facing
+ * schedule input. requiredDrivers is mandatory (Stage 2D staffing
+ * simplification) -- staffing lives directly on the Shift, exactly like
+ * start/end time. Still deliberately excludes pay/high-value/key/timezone
+ * -- those belong elsewhere or stay internal, never asked of the manager in
+ * Shift Setup.
+ */
+export interface ShiftScheduleInput {
+  name: string;
+  startTime: string;
+  endTime: string;
+  /** Monday=0..Sunday=6. At least one required -- enforced by the RPC itself, not just client-side validation. */
+  weekdays: number[];
+  /** Mandatory, >= 1 -- enforced by the RPC itself, not just client-side validation. No default; never silently coalesced. */
+  requiredDrivers: number;
+  /** Defaults to "today" in the resort's own timezone (resolved server-side) when omitted. */
+  effectiveFrom?: string;
+  /** Open-ended ("continues until changed") when omitted. */
+  effectiveTo?: string;
+}
+
 export interface ShiftConfigurationRepository {
-  listShiftTypes(resortId: string): Promise<ShiftTypeRecord[]>;
-  listShiftTemplates(shiftTypeId: string): Promise<ShiftTemplateRecord[]>;
-  /** Manager-side, full-fidelity read (pay/premium/headcount included). */
+  /**
+   * The manager-facing "Shift" list (Stage 2D Checkpoint 4) -- one entry
+   * per shift type, its current (or last-known) schedule assembled via
+   * `assembleShifts`. This is what Shift Setup renders; components should
+   * never need `listShiftTypes`/`listShiftTemplates` directly any more.
+   */
+  listShifts(resortId: string): Promise<ShiftRecord[]>;
+  /** Manager-side, full-fidelity read (staffing/premium included; pay is never a shift_instances field -- see docs/business-rules.md). */
   listShiftInstances(params: { resortId: string; weekStart: string }): Promise<ShiftInstanceRecord[]>;
 
-  createShiftType(input: { resortId: string; key: string; name: string; sortOrder: number }): Promise<ShiftTypeRecord>;
-  renameShiftType(shiftTypeId: string, name: string): Promise<ShiftTypeRecord>;
-  /** Display ordering only — never touches `key` or `resort_id`, both immutable after creation (Stage 2D Checkpoint 1 guard). */
-  reorderShiftType(shiftTypeId: string, sortOrder: number): Promise<ShiftTypeRecord>;
-  /** Rejected by the database if any of the shift type's recurring templates are still active — surface that as a manager-facing error, not a workaround. */
-  deactivateShiftType(shiftTypeId: string): Promise<ShiftTypeRecord>;
-
   /**
-   * Overlap (same resort/shift type/weekday, active, overlapping effective
-   * range) is rejected by the database's exclusion constraint — surface
-   * that as a manager-facing "already a schedule covering that day" error,
-   * never a raw constraint message.
+   * Atomic (create_shift): one new stable shift + its whole weekday
+   * schedule + required staffing count, in a single transaction. No pay/
+   * high-value inputs -- pay belongs to Payroll, configured separately;
+   * high-value is not part of the V1 product model. The internal `key` is
+   * generated server-side; the manager never sees or supplies it, and a
+   * name that collides with an existing key is silently disambiguated,
+   * never rejected.
    */
-  createShiftTemplateVersion(input: {
-    shiftTypeId: string;
-    resortId: string;
-    weekday: number;
-    startTime: string;
-    endTime: string;
-    requiredDrivers: number;
-    basePayChf: number;
-    deliveryRateChf: number;
-    isPremium: boolean;
-    effectiveFrom: string;
-    /** Open-ended (current/ongoing) when omitted. */
-    effectiveTo?: string;
-  }): Promise<ShiftTemplateRecord>;
+  createShift(resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }>;
   /**
-   * Closes a template version through the effective-dated model (sets
-   * effective_to + is_active=false) — never a raw field update. To "revise"
-   * an active template (change its time/pay/headcount going forward),
-   * deactivate it with effectiveTo = the day before the new version's
-   * effectiveFrom, then call createShiftTemplateVersion for the new one —
-   * there is no combined "update in place" operation, matching the
-   * approved effective-dated model (past configuration is never rewritten).
+   * Atomic (revise_shift): renames/retimes/reschedules an ACTIVE shift in
+   * one transaction, diffing the current weekday set against the new one
+   * server-side. Never rewrites history -- a weekday version that already
+   * governs real dates is retired, not overwritten in place.
    */
-  deactivateShiftTemplate(templateId: string, effectiveTo: string): Promise<ShiftTemplateRecord>;
+  reviseShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }>;
+  /**
+   * Atomic (deactivate_shift): ends every active weekday and marks the
+   * shift inactive, in one transaction. Never deletes the underlying
+   * shift_type, and never touches already-materialised future
+   * shift_instances -- use preview/applyTemplateCancellation separately
+   * for those.
+   */
+  deactivateShift(shiftTypeId: string, resortId: string, effectiveTo?: string): Promise<{ shiftTypeId: string }>;
+  /**
+   * Atomic (reactivate_shift): brings an inactive shift back under the
+   * SAME stable shift_type_id, with brand-new schedule rows from
+   * `input.effectiveFrom` -- never resurrects/reopens old historical rows.
+   */
+  reactivateShift(shiftTypeId: string, resortId: string, input: ShiftScheduleInput): Promise<{ shiftTypeId: string }>;
 
   // Deliberately no "moveShiftInstanceDate"-style method: shift_instances.date
-  // is immutable (Checkpoint 4). Moving a shift is cancel + create new,
-  // which belongs to a future rota-management checkpoint, not here.
+  // is immutable. Moving a shift is cancel + create new, which belongs to a
+  // future rota-management checkpoint, not here.
 
   // Stage 2C: materialisation + template refresh/cancellation. Thin RPC
   // wrappers only — the database functions remain authoritative; nothing
-  // here reimplements their logic. Not yet wired into any UI.
+  // here reimplements their logic.
 
-  /** Insert-only: creates missing shift_instances from active templates. Default horizon: today through end of next month. */
+  /** Insert-only: creates missing shift_instances from active templates. Default horizon: today through end of next month. required_drivers is snapshotted directly from the governing Shift -- never missing/guessed (Stage 2D staffing simplification). */
   materialiseShifts(resortId: string, fromDate?: string, toDate?: string): Promise<MaterialiseShiftsResult>;
-  /** Read-only: what apply_template_refresh would change for the currently-safe (v_refreshable_instances) set. */
+  /** Read-only: what apply_template_refresh would change for the currently-safe (v_refreshable_instances) set. Schedule fields (name/sort_order/start_time/end_time) plus required_drivers (Stage 2D staffing simplification) -- pay/high-value are still never schedule-refresh concerns. */
   previewTemplateRefresh(resortId: string, fromDate?: string): Promise<TemplateRefreshPreviewRow[]>;
   /** Updates exactly the previewed safe set from their current governing template. Never removes assignments. */
   applyTemplateRefresh(resortId: string, fromDate?: string): Promise<ApplyTemplateRefreshResult>;
@@ -156,7 +200,15 @@ export interface ShiftConfigurationRepository {
 }
 
 export interface AvailabilityRepository {
-  /** Driver-safe shift list for answering availability against. */
+  /**
+   * Driver-safe shift list for answering availability against -- every
+   * active shift_instance in the calling driver's own resort, unbounded by
+   * week (the caller groups/filters by week client-side, exactly the way
+   * the manager-facing `listShiftInstances` is fetched per-week instead:
+   * a driver's Availability page needs to browse several weeks back/
+   * forward without a request per navigation click). Never includes
+   * required_drivers/is_premium/pay -- see driver_visible_shifts.
+   */
   listDriverVisibleShifts(resortId: string): Promise<DriverVisibleShift[]>;
   listAvailability(params: { driverId: string; resortId: string; weekStart: string }): Promise<AvailabilityAnswer[]>;
   setAvailability(params: {
@@ -171,9 +223,90 @@ export interface AvailabilityRepository {
   getWeekAvailabilityStatus(driverId: string, weekStart: string): Promise<WeekAvailabilityStatus>;
   confirmAvailabilityWeek(driverId: string, weekStart: string): Promise<ConfirmWeekOutcome>;
   reopenAvailabilityWeek(driverId: string, weekStart: string): Promise<ReopenWeekOutcome>;
+
+  /**
+   * Stage 3: a direct, read-only fetch of the driver's own
+   * availability_submissions row (or null if none exists yet). Distinct
+   * from `getWeekAvailabilityStatus` -- that RPC reports pure answer
+   * *completeness*, recomputed fresh and never trusting this table; the
+   * driver-facing UI additionally needs the actual confirmation/staleness
+   * state itself (has the driver clicked Confirm; if reopened, was that
+   * the driver's own choice or an automatic service-change invalidation),
+   * which only this row carries. Backed by the existing
+   * `availability_submissions_driver_select_own` RLS policy -- no new RPC.
+   */
+  getAvailabilitySubmission(driverId: string, weekStart: string): Promise<AvailabilitySubmissionRecord | null>;
+
+  // ---------------------------------------------------------------------
+  // Manager-only (Stage 3): visibility into driver submission state, never
+  // assignment. Both are plain authorized reads over tables the manager
+  // role already has full SELECT on (`is_active_manager()` policies) --
+  // no new RPC or migration needed for either.
+  // ---------------------------------------------------------------------
+
+  /** One row per active driver at the resort for the given week: answered/total counts + the derived submission state (see DriverWeekAvailabilityState). */
+  listAvailabilitySubmissionStatus(resortId: string, weekStart: string): Promise<AvailabilitySubmissionSummary[]>;
+  /** One driver's own answer (or none) for every active shift_instance at their resort that week -- the manager's per-driver detail view. */
+  getResortWeekAvailability(driverId: string, weekStart: string): Promise<DriverShiftAvailability[]>;
 }
 
 export interface RotaRepository {
   /** Driver-safe "My Rota": own published assignments only, no colleague identities. */
   listDriverVisibleAssignments(driverId: string): Promise<DriverVisibleAssignment[]>;
+}
+
+/**
+ * Stage 2D Payroll Checkpoint B: rate configuration only. Never calculates
+ * payroll, never resolves a rate onto a shift_instance, never touches
+ * attendance/Onfleet/adjustments -- see docs/business-rules.md section G.
+ *
+ * Both `list*` methods return every row for the resort (or driver), active
+ * and historical alike, flat and unfiltered by date -- callers derive
+ * Current (the row covering "today")/Scheduled (effective_from in the
+ * future)/History (effective_to in the past) themselves via one shared
+ * categorisation, exactly the same three-way split for both rate types
+ * (see `categorizeRatePeriods` in `pages/manager/configuration/PayrollRulesPanel.tsx`)
+ * -- this repository layer deliberately does not duplicate that resolution
+ * logic per rate type, and does not expose a bespoke "current rate" RPC,
+ * since the flat list is already small (one row per configured period) and
+ * the categorisation is pure/date-only.
+ */
+export interface PayrollRulesRepository {
+  /** Every shift_base_pay_rules row for shift types at this resort, current and historical alike. */
+  listShiftBasePayRules(resortId: string): Promise<ShiftBasePayRuleRecord[]>;
+  /**
+   * Atomic (set_shift_base_pay_rate). Creates the Shift's first rate, or
+   * schedules a future change -- never overwrites an already-real
+   * historical/in-effect period's own values; a genuine future change
+   * closes the current open-ended row (effective_to = the day before the
+   * new one starts) and inserts a fresh row, while correcting a not-yet-
+   * started future plan updates it in place instead of piling up redundant
+   * rows. Rejects a backdate attempt on/before an already-in-effect rule's
+   * own start, and rejects any other overlap -- the manager never sees a
+   * raw constraint violation, only a mapped, manager-facing message.
+   */
+  setShiftBasePayRate(shiftTypeId: string, resortId: string, basePayChf: number, effectiveFrom?: string): Promise<ShiftBasePayRuleRecord>;
+
+  /** Every driver_delivery_rates row for drivers at this resort, current and historical alike -- grouped by driverId by the caller. Manager-only -- never exposed to any driver-facing path. */
+  listDriverDeliveryRates(resortId: string): Promise<DriverDeliveryRateRecord[]>;
+  /**
+   * Atomic (set_driver_delivery_rate). Same historical-safety shape as
+   * setShiftBasePayRate, keyed by driver instead of Shift. resort_id is
+   * always resolved server-side from the driver's own record, never
+   * client-supplied.
+   */
+  setDriverDeliveryRate(driverId: string, rateChf: number, effectiveFrom?: string): Promise<DriverDeliveryRateRecord>;
+
+  /**
+   * Atomic (correct_shift_base_pay_rate), Stage 2D Payroll Checkpoint B.1.
+   * A deliberate, distinct action from setShiftBasePayRate: fixes a
+   * data-entry MISTAKE on an existing, still-open (current or scheduled)
+   * rule -- updates its amount only, never its effective_from/effective_to,
+   * so it can never fabricate a fake historical period. `ruleId` is the
+   * target row's own id (already known from listShiftBasePayRules, never
+   * manager-typed). Rejects correcting an already-closed historical period.
+   */
+  correctShiftBasePayRate(shiftTypeId: string, resortId: string, ruleId: string, newBasePayChf: number): Promise<ShiftBasePayRuleRecord>;
+  /** Atomic (correct_driver_delivery_rate). Same shape as correctShiftBasePayRate, keyed by driver instead of Shift. */
+  correctDriverDeliveryRate(driverId: string, ruleId: string, newRateChf: number): Promise<DriverDeliveryRateRecord>;
 }

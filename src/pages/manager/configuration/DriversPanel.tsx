@@ -64,6 +64,12 @@ export function DriversPanel() {
     return map;
   }, [resortsQuery.data]);
 
+  // Assigning a NEW driver to a resort is an operational selector (Stage
+  // 2D Checkpoint 4.1 §5) -- active resorts only. The "Filter by resort"
+  // browsing dropdown below is deliberately left showing every resort so a
+  // manager can still find/manage drivers already at a since-deactivated one.
+  const activeResorts = useMemo(() => (resortsQuery.data ?? []).filter((r) => r.isActive), [resortsQuery.data]);
+
   const visibleDrivers = useMemo(() => {
     const drivers = driversQuery.data ?? [];
     if (statusFilter === 'active') return drivers.filter((d) => d.isActive);
@@ -79,7 +85,7 @@ export function DriversPanel() {
       <CardHeader
         title="Drivers"
         action={
-          <Button variant="secondary" size="sm" onClick={() => setShowCreate(true)} disabled={!resortsQuery.data?.length}>
+          <Button variant="secondary" size="sm" onClick={() => setShowCreate(true)} disabled={activeResorts.length === 0}>
             <IconPlus style={{ width: 14, height: 14 }} />
             Add driver
           </Button>
@@ -179,9 +185,9 @@ export function DriversPanel() {
 
       {showCreate && (
         <CreateDriverModal
-          resorts={resortsQuery.data ?? []}
+          resorts={activeResorts}
           languages={languagesQuery.data ?? []}
-          defaultResortId={resortFilter !== ALL_RESORTS ? resortFilter : undefined}
+          defaultResortId={resortFilter !== ALL_RESORTS && activeResorts.some((r) => r.id === resortFilter) ? resortFilter : undefined}
           onClose={() => setShowCreate(false)}
           onCreated={(name, onfleetWarning) => {
             setShowCreate(false);
