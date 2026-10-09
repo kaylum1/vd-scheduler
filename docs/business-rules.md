@@ -163,8 +163,13 @@ No schema change is being made for this in Checkpoint 1.1 — flagged here
 for the checkpoint that actually builds manual rota editing to decide against
 the concrete UI it's building at that point.
 
-**Implemented:** nothing yet. This section is a recorded requirement only —
-belongs to the future "real Manual Rota" checkpoint.
+**Implemented (database layer only — Manual Rota MR-A):** the rules above are
+now enforced in the database by `assign_driver` / `unassign_driver` — see
+section J. The unavailable-driver warning/override is DB-enforced, a manager
+may edit assignments in a published current/future week without unpublishing
+it, and every change is audited. **No Manual Rota UI exists yet** — that is
+a later checkpoint. The optional override reason, which the schema note above
+left open, lives in `audit_log.context`, not on `rota_assignments`.
 
 ---
 
@@ -667,3 +672,83 @@ The live Availability page instead resolves its own id-space bridge via
 doc comment for why the translation couldn't live in `AuthContext` itself
 without breaking `MyRota.tsx`. Supabase mode is entirely unaffected (real
 `driver_id`/`resort_id` throughout, from `resolveCurrentUser()`).
+
+---
+
+## J. Manual Rota assignment — database rules (MR-A)
+
+**Decided and implemented in the database (Manual Rota checkpoint MR-A).**
+The Manual Rota UI, repository layer, and weekly read model are **not** built
+yet — this section documents only what the database now guarantees.
+
+**Manual assignment is deliberately more permissive than future Auto-Rota.**
+A manager has information the system doesn't (a WhatsApp message, a phone
+call), so manager control stays authoritative. Future Auto-Rota will treat
+both Unavailable *and* Not Submitted as ineligible (section H §F); manual
+assignment may override either, after an explicit acknowledgement.
+
+**Writes go through two atomic RPCs — and only through them.**
+`assign_driver(p_shift_instance_id, p_driver_id, p_confirm_availability_override
+default false, p_reason default null)` and `unassign_driver(p_shift_instance_id,
+p_driver_id)`, both `SECURITY DEFINER` + `assert_active_manager()`. Managers
+keep `SELECT` on `rota_assignments` (the weekly read model needs it) but have
+**no** direct `INSERT`/`UPDATE`/`DELETE`: the grants are revoked and the
+`FOR ALL` policy was replaced by a `SELECT`-only one, so no client path can
+bypass the rules below. Drivers still have no base-table access at all (they
+use `driver_visible_assignments`, unchanged). `anon` cannot execute either RPC.
+
+**What a manager may do:** assign an Available driver; assign a Not Submitted
+or Unavailable driver *after explicit acknowledgement*; assign more drivers than
+`required_drivers` (a minimum, not a capacity — no DB headcount cap); edit a
+**published** current/future week (the week stays published; `rota_publications`
+is never touched; the change is audited).
+
+**What a manager may not do:** assign an inactive driver; assign across resorts;
+assign the same driver to the same shift twice (the existing
+`unique(shift_instance_id, driver_id)` stays the authoritative guard); assign to
+a cancelled shift; assign **or** unassign a shift dated before the resort's
+operational today (Europe/Zurich via `operational_today`, never `current_date`;
+today and future are editable); unassign a driver once **any** attendance row
+exists for that driver+shift (attendance status is deliberately not inspected —
+correcting recorded attendance is a separate, future, audited workflow).
+
+**Availability override is server-side, never trusted from the client.** The RPC
+reads the driver's *current* availability itself at write time (`available` /
+`unavailable` / `not_submitted` = no row) and accepts no availability parameter.
+If the state is not `available` and `p_confirm_availability_override` is false,
+**nothing is inserted** and it raises SQLSTATE `VD001` with `DETAIL` = the
+current state; the (future) client shows the matching warning and, only after the
+manager confirms, retries with the flag set — and the server re-reads
+availability again. This makes a stale page safe: a driver who flips to
+Unavailable after the manager loaded the page cannot be silently assigned.
+
+**Stable error contract** (the repository/UI key off SQLSTATE and `DETAIL`, not
+message text): `42501` not a manager · `P0002` shift/driver/assignment not found
+· `23514` business-rule rejection (cancelled shift, inactive driver, different
+resort, reason > 500 chars) · `23505` already assigned · `55006` locked, with
+`DETAIL` `historical_shift` or `attendance_recorded` · `VD001` override required,
+`DETAIL` `unavailable` | `not_submitted`.
+
+**Optional override reason → `audit_log.context`, not the assignment row.**
+`p_reason` is optional (trimmed, empty = none, max 500). New nullable column
+`audit_log.context jsonb`; the generic audit trigger copies the transaction-local
+setting `app.audit_context` into it. Assign records `operation`,
+`availability_state`, `availability_override` (true only when the manager
+actually overrode Unavailable/Not Submitted) and `reason` when given; unassign
+records `operation`. The RPC sets the context immediately before its single
+audited write and clears it immediately after, a failed statement's
+subtransaction rollback reverts it, and a malformed context is recorded as NULL
+rather than ever failing a write — so a later unrelated audited write in the
+same transaction can never inherit it (regression-tested). `audit_log` is
+manager-readable only, so override reasons are never visible to drivers.
+
+**Inactive assignees.** Deactivating a driver does not delete or rewrite their
+existing assignment, and a manager can still unassign them. A *new* assignment
+of an inactive driver is rejected. (The UI-level rule that an inactive assignee
+does not count toward coverage belongs to the future read model/UI.)
+
+**Known, deliberately unaddressed:** nothing prevents one driver being assigned
+to overlapping shifts on the same day. No overlap rule exists anywhere in the
+schema; recorded as a possible future product decision/warning, not a blocker.
+
+**Tests:** `supabase/tests/85_manual_rota_assignments.sql`.

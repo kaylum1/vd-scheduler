@@ -72,12 +72,12 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `60_shift_staffing.sql` | `required_drivers` mandatory on `shift_templates`/`create_shift`/`revise_shift`/`reactivate_shift`, two separately-named Shifts with different staffing and no overlap conflict, direct materialisation (no rota-rule join), history preservation across a staffing revision, and proof the old `rota_rules_*` tables/counts are gone entirely (Stage 2D staffing simplification, replacing the abandoned Checkpoint 3 Rota Rules design) |
 | `70_atomic_shift_rpcs.sql` | `create_shift`/`revise_shift`/`deactivate_shift`/`reactivate_shift` atomicity, history preservation, security, audit (Stage 2D Checkpoint 3) |
 | `80_resort_lifecycle.sql` | `create_resort`/`deactivate_resort`/`reactivate_resort` atomicity, dependency-blocked deactivation, history preservation, security, audit (Stage 2D Checkpoint 4.1) |
+| `85_manual_rota_assignments.sql` | `assign_driver`/`unassign_driver` (Manual Rota MR-A): server-side availability-override acknowledgement (Unavailable / Not Submitted, incl. the stale-client race), optional reason in `audit_log.context`, audit-context isolation (cleared after each RPC, no leak into a later audited write, no leak after a failed statement, malformed context never fails a write), over-assignment, active/same-resort/duplicate/cancelled-shift rules, today-vs-past boundary (operational timezone), published-week edits leaving `rota_publications` untouched, attendance guard, inactive assignees, and the closed direct-write path (manager SELECT-only, driver/anon rejected) |
 | `90_payroll_rate_foundations.sql` | `shift_base_pay_rules`/`driver_delivery_rates` effective dating, overlap prevention, historical-safe resolution, security, audit (Stage 2D Payroll Checkpoint A) |
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
 | `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of the pre-Manual-Rota cleanup checkpoint this suite has **320
-assertions**. That number will keep changing as the suite grows — don't
+As of Manual Rota checkpoint MR-A this suite has **407 assertions**. That number will keep changing as the suite grows — don't
 chase a specific count; the point is that it stays genuinely comprehensive
 and, unlike its scratchpad predecessor, that it survives.
 

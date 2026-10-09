@@ -26,7 +26,15 @@ end $$;
 
 -- ---------------------------------------------------------------------
 -- Multiple drivers may work one shift; the same driver twice is rejected.
+--
+-- These are TABLE-LEVEL constraint tests (unique, composite resort FK), so
+-- they run as the database owner: since Manual Rota MR-A, an authenticated
+-- manager has no direct INSERT/UPDATE/DELETE on rota_assignments at all --
+-- assign_driver/unassign_driver are the only client write path (see
+-- 85_manual_rota_assignments.sql). The constraints themselves remain the
+-- authoritative last line of defence underneath those RPCs.
 -- ---------------------------------------------------------------------
+select pg_temp.as_postgres();
 do $$
 begin
   insert into rota_assignments (shift_instance_id, driver_id, resort_id, assignment_source)
@@ -46,6 +54,7 @@ select pg_temp.expect_error('rota_assignments: cross-resort driver/shift pairing
   format('insert into rota_assignments (shift_instance_id, driver_id, resort_id, assignment_source) values (%L, %L, %L, %L)',
     current_setting('dbtest.assign_shift_id'), current_setting('dbtest.driver_b_id'), current_setting('dbtest.resort_a'), 'manual'),
   '23503');
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
 
 -- ---------------------------------------------------------------------
 -- Under/over-assigned draft state is representable: nothing at the DB

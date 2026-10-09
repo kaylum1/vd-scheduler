@@ -180,6 +180,7 @@ export type Database = {
           after: Json | null
           before: Json | null
           changed_fields: string[] | null
+          context: Json | null
           id: string
           occurred_at: string
           row_id: string
@@ -193,6 +194,7 @@ export type Database = {
           after?: Json | null
           before?: Json | null
           changed_fields?: string[] | null
+          context?: Json | null
           id?: string
           occurred_at?: string
           row_id: string
@@ -206,6 +208,7 @@ export type Database = {
           after?: Json | null
           before?: Json | null
           changed_fields?: string[] | null
+          context?: Json | null
           id?: string
           occurred_at?: string
           row_id?: string
@@ -1141,6 +1144,18 @@ export type Database = {
         }[]
       }
       assert_active_manager: { Args: never; Returns: undefined }
+      assign_driver: {
+        Args: {
+          p_confirm_availability_override?: boolean
+          p_driver_id: string
+          p_reason?: string
+          p_shift_instance_id: string
+        }
+        Returns: {
+          assignment_id: string
+          availability_state: string
+        }[]
+      }
       confirm_availability_week: {
         Args: { p_driver_id: string; p_week_start: string }
         Returns: {
@@ -1381,6 +1396,12 @@ export type Database = {
       shift_instance_week_is_published: {
         Args: { p_shift_instance_id: string }
         Returns: boolean
+      }
+      unassign_driver: {
+        Args: { p_driver_id: string; p_shift_instance_id: string }
+        Returns: {
+          assignment_id: string
+        }[]
       }
       week_availability_status: {
         Args: { p_driver_id: string; p_week_start: string }
