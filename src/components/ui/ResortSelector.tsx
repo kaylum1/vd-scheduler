@@ -18,13 +18,18 @@ import type { ResortRecord } from '../../repositories/domain';
  * its expanded driver row) wraps `setSelectedResortId` itself when calling
  * <ResortSelector onSelect={...}> -- this hook never assumes one.
  */
-export function useActiveResortSelection() {
-  const [selectedResortId, setSelectedResortId] = useState<string | null>(null);
-
-  const resortsQuery = useQuery({
+/** The shared resorts query (one cache entry). Read-only -- holds no selection state. */
+export function useResortsQuery() {
+  return useQuery({
     queryKey: ['config', 'resorts'],
     queryFn: () => getRepositories().resorts.listResorts(),
   });
+}
+
+export function useActiveResortSelection() {
+  const [selectedResortId, setSelectedResortId] = useState<string | null>(null);
+
+  const resortsQuery = useResortsQuery();
 
   const activeResorts = useMemo(() => (resortsQuery.data ?? []).filter((r) => r.isActive), [resortsQuery.data]);
 

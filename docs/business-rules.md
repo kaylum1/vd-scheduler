@@ -53,9 +53,12 @@ should expect to see on data created since. New Shifts can never produce it.
 - [`coverageTone`/`coverageLabel`](../src/components/ui/StatusPill.tsx) —
   pure functions that render coverage for a shift *already known to exist*.
   Never called for a "no shift" cell.
-- [`ShiftCard` vs `EmptyShiftCell`](../src/components/rota/ShiftCard.tsx) —
-  `WeekGrid` renders `ShiftCard` only when a real shift exists for that
-  row/day, `EmptyShiftCell` (neutral, dashed border, no text) otherwise.
+- [`ManualRotaPanel`](../src/components/rota/ManualRotaPanel.tsx) — renders
+  only the shift instances the repository returns, grouped by day (no
+  fabricated empty days); a week with none shows the neutral "No shifts are
+  scheduled for this week." and never "Uncovered". Coverage per shift comes
+  from the shared [`getShiftCoverage`](../src/lib/rotaCoverage.ts) (active
+  assignees only — see section K).
 - [`TodayTomorrowPanel`](../src/components/dashboard/TodayTomorrowPanel.tsx) —
   renders "No shifts scheduled" (muted chip) when a resort has zero shifts
   that day, and only computes/renders "No coverage" per-shift for shifts
@@ -70,18 +73,19 @@ should expect to see on data created since. New Shifts can never produce it.
   mandatory at Shift-creation time, so it can never be missing.
 
 Tests: [`StatusPill.test.ts`](../src/components/ui/StatusPill.test.ts),
-[`ShiftCard.test.tsx`](../src/components/rota/ShiftCard.test.tsx).
+[`ManualRotaPanel.test.tsx`](../src/components/rota/ManualRotaPanel.test.tsx).
 
-**Known temporary inconsistency (not a bug to fix here):** Manager
-Dashboard/Rota are still Stage 1.1's mock data (`src/mock-data/shifts.ts`),
-which currently fabricates a Dinner shift for every resort every day —
-including Verbier, which the *live* Configuration page (Stage 2D Checkpoint
-1) correctly shows has zero configured shift types. This is why Verbier can
-currently show "No shift types yet" in Configuration while the mock Rota
-still shows a (fabricated, uncovered) Dinner shift. This is a mock/live data
-source mismatch, not a presentation-logic bug, and is **not** to be papered
-over by mixing real Supabase shifts into the mock rota. It resolves itself
-naturally once Manager Rota is migrated to live data (a future checkpoint).
+**Known temporary inconsistency (not a bug to fix here):** the Manager
+**Dashboard** and the **Driver My Rota** page are still Stage 1.1's mock data
+(`src/mock-data/shifts.ts`), which fabricates a Dinner shift for every resort
+every day — including Verbier, which the *live* Configuration page and the
+*live* Manual Rota (Rota & Availability) correctly show has no shifts. So the
+Dashboard can show an uncovered Verbier Dinner while Manual Rota shows "No
+shifts are scheduled for this week." This is a mock/live data source
+mismatch, not a presentation-logic bug, and is **not** to be papered over by
+mixing real shifts into the mock pages. The Manager Rota itself is now live
+(sections J–L); Driver My Rota is planned to go live **before** any Publish
+UI is built, and the Dashboard in a later checkpoint.
 
 ---
 
@@ -167,9 +171,9 @@ the concrete UI it's building at that point.
 now enforced in the database by `assign_driver` / `unassign_driver` — see
 section J. The unavailable-driver warning/override is DB-enforced, a manager
 may edit assignments in a published current/future week without unpublishing
-it, and every change is audited. **No Manual Rota UI exists yet** — that is
-a later checkpoint. The optional override reason, which the schema note above
-left open, lives in `audit_log.context`, not on `rota_assignments`.
+it, and every change is audited. The manager UI for this is implemented (MR-C,
+section L). The optional override reason, which the schema note above left
+open, lives in `audit_log.context`, not on `rota_assignments`.
 
 ---
 
@@ -627,10 +631,11 @@ driver's actual per-shift answers. This is composed from plain authorized
 reads (the manager role already has full SELECT on `drivers`/
 `shift_instances`/`availability`/`availability_submissions`/
 `rota_publications`) — no new RPC or migration. **No assignment, Auto-
-Rota, or Publish control exists in this manager view** — those remain
-future checkpoints; the pre-existing Stage 1.1 mock Rota grid is kept
-separate and clearly labelled as a preview, never blended with this live
-panel.
+Rota, or Publish control exists in this manager view** — assignment lives in
+the separate Manual Rota panel on the same page (section L), and the Stage 1.1
+mock Rota preview that used to sit below it has been removed. As of MR-C this
+panel is driven by `resortId`/`weekStart` props from the page and keeps no
+selection state of its own.
 
 **I. Future Auto-Rota's eligibility input (design constraint, not built).**
 Auto-Rota (§H above) must be able to query, per shift_instance: which
@@ -647,8 +652,7 @@ shape directly; nothing further is needed to prepare for it.
 `getResortWeekAvailability`), implemented for both providers.
 `pages/driver/Availability.tsx` (live, replacing the Stage 1.1 mock
 version entirely) and `components/availability/ManagerAvailabilityPanel.tsx`
-(new, mounted inside `pages/manager/RotaAvailability.tsx` above the
-still-mock Rota preview).
+(new, mounted inside `pages/manager/RotaAvailability.tsx`).
 
 **Known mock-mode limitation:** the mock provider has no persisted
 `shift_instances` (they're generated fresh from templates on every read),
@@ -757,9 +761,8 @@ schema; recorded as a possible future product decision/warning, not a blocker.
 
 ## K. Manual Rota — repository and read model (MR-B)
 
-**Implemented (data layer only).** The typed repository/domain layer for the
-manager's weekly rota. **No Manual Rota UI exists yet**; `RotaAvailability.tsx`
-still renders the Stage 1.1 mock preview until the frontend checkpoint.
+**Implemented (data layer — MR-B).** The typed repository/domain layer for the
+manager's weekly rota. The UI built on it is section L.
 
 **Manager week read model** — `RotaRepository.getManagerWeekRota({ resortId,
 weekStart })` → `ManagerWeekRota { isPublished, candidateDrivers, shifts[] }`
@@ -826,3 +829,66 @@ repositories/views; never reuse these shapes for them.
 **Tests:** `lib/rotaCoverage.test.ts`, `repositories/managerRotaModel.test.ts`,
 `repositories/supabase/{rota,rotaErrors,mappers}.test.ts`,
 `repositories/mock/rota.test.ts`.
+
+---
+
+## L. Manual Rota — manager UI (MR-C)
+
+**Implemented.** `Rota & Availability` (`pages/manager/RotaAvailability.tsx`) is
+the manager's real weekly assignment screen, built only on `RotaRepository`
+(section K) — never Supabase directly (import-boundary tested). It replaced the
+Stage 1.1 mock "Rota (preview)", its fake "current week is published" logic,
+and its dead Publish button; those components and their CSS are gone.
+
+**One shared context.** The page owns exactly one resort and one week — a
+single `ResortSelector` and a single `WeekNav` — and passes `resortId` /
+`weekStart` to both `ManualRotaPanel` and `ManagerAvailabilityPanel`, so
+changing either always updates both. The Draft/Published chip is the REAL
+publication state of that resort + week, display only. The page's indicator and
+the panel share one query (`managerRotaKeys.week`); that query uses
+`staleTime: 0` (unlike the app's 30s default) so returning to a week re-reads
+availability a driver may have changed.
+
+**Shifts and coverage.** Real shift instances only, grouped by day (no
+fabricated empty days), several per day, nothing hard-coded to Lunch/Dinner and
+never parsing "(1P)/(2P)". Each card shows `N / required active assigned` plus a
+Covered/Uncovered pill (text and border, not colour alone). Above the
+requirement stays plain "Covered" (e.g. 3 / 2) — there is no "over-covered"
+state. **An inactive assignee is shown, labelled Inactive, and is removable, but
+does not count toward coverage** (required 2 with one active + one inactive
+reads 1 / 2, Uncovered).
+
+**Assigning.** "Assign a driver" lists only the resort's *active* drivers not
+already on the shift, Available first, each with an icon + text availability
+badge (Available / Not Submitted / Unavailable, with distinct border styles).
+Available and the shift still needs staff → assigns immediately. Otherwise ONE
+confirmation dialog covers every reason to pause: a Not Submitted warning
+(amber), an Unavailable warning (stronger), a "this shift already has its
+required coverage" notice, or any combination — never two sequential dialogs.
+The reason is optional (≤ 500 chars, stored only in the audit trail).
+
+**Race-safe.** Every normal assign attempt handles the server's typed
+`AvailabilityOverrideRequiredError`: if a driver the screen showed as Available
+has since become Unavailable / Not Submitted, the dialog opens for the state
+the SERVER reports (not the stale screen), and confirming retries with the
+acknowledgement. Remove calls `unassignDriver`; failures (historical shift,
+attendance recorded, already removed, ...) show a clean manager message and
+refresh stale data — never SQLSTATEs.
+
+**Dates and publication.** A shift dated before the operational today
+(Europe/Zurich, never the browser's date) is read-only and labelled Historical;
+today and the future are editable. A published week shows an informational note
+and stays fully editable — there is no Publish / Unpublish control, and a
+manager edit never unpublishes it.
+
+**Responsive.** Cards stack by day (no seven-column grid), so there is no
+horizontal overflow at 375px; dialogs fit the viewport; controls are
+touch-sized.
+
+**Not part of this checkpoint:** Auto-Rota, Publish UI, Attendance UI, live
+Driver My Rota, live Dashboard.
+
+**Tests:** `components/rota/ManualRotaPanel.test.tsx`,
+`pages/manager/RotaAvailability.test.tsx`,
+`components/availability/ManagerAvailabilityPanel.test.tsx`,
+`components/rota/manualRotaBoundary.test.ts`.
