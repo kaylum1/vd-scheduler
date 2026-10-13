@@ -744,11 +744,85 @@ manager-readable only, so override reasons are never visible to drivers.
 
 **Inactive assignees.** Deactivating a driver does not delete or rewrite their
 existing assignment, and a manager can still unassign them. A *new* assignment
-of an inactive driver is rejected. (The UI-level rule that an inactive assignee
-does not count toward coverage belongs to the future read model/UI.)
+of an inactive driver is rejected. An inactive assignee does not count toward
+coverage — see section K.
 
 **Known, deliberately unaddressed:** nothing prevents one driver being assigned
 to overlapping shifts on the same day. No overlap rule exists anywhere in the
 schema; recorded as a possible future product decision/warning, not a blocker.
 
 **Tests:** `supabase/tests/85_manual_rota_assignments.sql`.
+
+---
+
+## K. Manual Rota — repository and read model (MR-B)
+
+**Implemented (data layer only).** The typed repository/domain layer for the
+manager's weekly rota. **No Manual Rota UI exists yet**; `RotaAvailability.tsx`
+still renders the Stage 1.1 mock preview until the frontend checkpoint.
+
+**Manager week read model** — `RotaRepository.getManagerWeekRota({ resortId,
+weekStart })` → `ManagerWeekRota { isPublished, candidateDrivers, shifts[] }`
+(`repositories/domain.ts`). Each shift carries `shiftInstanceId`, date, name,
+`HH:MM` times, `requiredDrivers`, its `assignments[]`, and `availabilityByDriver`.
+Assembled by one pure function (`repositories/managerRotaModel.ts`) fed by both
+providers, so grouping/ordering/derivation cannot drift between them. The
+Supabase provider uses at most five authorised reads (three in parallel, then
+two filtered by the week's shift ids), never one per driver or shift; a week
+with no service skips the second stage and returns a valid empty model. The
+cache key is `managerRotaKeys.week(resortId, weekStart)`. *Scaling watch item:*
+the availability read returns shifts × drivers rows and the API caps a response
+at `max_rows = 1000` — comfortably above any current resort; page the read only
+if one resort-week could approach it.
+
+**Two driver concepts.** `candidateDrivers` = *active* drivers at the resort, the
+only people to offer as new assignments. An existing assignment carries its own
+resolved `driverName` / `isDriverActive`, so an assignee who has since been
+deactivated is still shown (and removable), never dropped. Availability is
+derived per exact shift instance: row `available`/`unavailable`, **no row =
+`not_submitted`** (never a stored status, never inferred from week confirmation).
+The model carries no audit context or override reason.
+
+**Coverage is derived, never stored** (`lib/rotaCoverage.ts`): *active*
+assignments `<` `required_drivers` → uncovered; `>=` → covered; above-required
+stays covered. **An inactive assignee does not count** — e.g. required 2 with one
+active and one inactive assignee is uncovered, so the manager sees the gap and
+replaces them.
+
+**Repository error contract — callers never see `VD001`, SQLSTATEs or PostgREST
+shapes.** `assignDriver` / `unassignDriver` are RPC wrappers only (the adapter
+never writes `rota_assignments` directly — tested). The Supabase adapter
+(`supabase/rotaErrors.ts`) is the single place that translates the database's
+contract (section J) into typed errors in `repositories/errors.ts`:
+`AvailabilityOverrideRequiredError { availabilityState: 'unavailable' |
+'not_submitted' }` (guard: `isAvailabilityOverrideRequired`) and
+`RotaAssignmentError { kind }` with kinds `duplicate_assignment`,
+`historical_shift`, `attendance_recorded`, `rule_violation`, `not_found`,
+`assignment_not_found` (guard: `isRotaAssignmentError`). The override state is
+read from the machine-readable `DETAIL`, never parsed from message text; an
+unrecognised `DETAIL` falls back to a generic error rather than being mistaken
+for a known state. The override flow reuses one method: call `assignDriver`
+without `confirmAvailabilityOverride`; on `AvailabilityOverrideRequiredError`
+show the matching warning and, only after the manager confirms, call it again
+with `confirmAvailabilityOverride: true`. The caller never supplies an
+availability state. *Known limit:* the database reports inactive driver, other
+resort, cancelled shift and an over-long reason under one SQLSTATE (`23514`) with
+no `DETAIL`, so they share `kind: 'rule_violation'` and are told apart only by the
+database's first-party `userMessage`. Distinct kinds would need a small DETAIL
+addition to the RPCs (a new migration) — deliberately not done.
+
+**Mock provider differences** (documented in `repositories/mock/rota.ts`): it
+reproduces the database's checks, order, typed errors and message text, but has
+**no attendance** (the attendance guard is database-only), **no audit** (the
+reason is accepted and discarded), and **no cancelled shifts**. Mock
+shift-instance ids are `${templateId}-${date}` — stable across reads, but a mock
+`reviseShift` that recreates the template changes them, orphaning mock
+assignments; the real database keeps instance identity.
+
+**Privacy boundary.** This model is manager-only (`required_drivers`, every
+resort driver, everyone's availability). Driver pages keep their own safe
+repositories/views; never reuse these shapes for them.
+
+**Tests:** `lib/rotaCoverage.test.ts`, `repositories/managerRotaModel.test.ts`,
+`repositories/supabase/{rota,rotaErrors,mappers}.test.ts`,
+`repositories/mock/rota.test.ts`.

@@ -39,7 +39,7 @@ import { generateMockShiftInstancesForWeek } from './shiftInstances';
  * week pushes directly into `mockAvailabilitySubmissions`, the same way
  * other mock tests fabricate a specific data state directly.
  */
-function isMockWeekPublished(resortId: string, weekStart: string): boolean {
+export function isMockWeekPublished(resortId: string, weekStart: string): boolean {
   return mockRotaPublications.some(
     (p) => p.resortId === resortId && p.weekStart === weekStart && p.publishedAt !== null && p.unpublishedAt === null
   );

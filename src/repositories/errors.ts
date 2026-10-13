@@ -61,3 +61,82 @@ export async function unwrap<T>(
   }
   return data;
 }
+
+// ---------------------------------------------------------------------
+// Manual Rota (MR-B): typed assignment errors.
+//
+// The database owns every assignment rule (assign_driver/unassign_driver,
+// MR-A) and reports failures through SQLSTATE/DETAIL. Components must never
+// see that: the Supabase adapter translates it (see
+// repositories/supabase/rotaErrors.ts) into the stable, provider-agnostic
+// errors below, and the mock provider throws the very same classes, so UI
+// code written against either behaves identically.
+// ---------------------------------------------------------------------
+
+/** The two driver availability states that require an explicit manager acknowledgement before assigning. */
+export type AvailabilityOverrideState = 'unavailable' | 'not_submitted';
+
+/**
+ * assign_driver refused to insert because the driver's CURRENT availability
+ * (read by the server at write time, never trusted from the client) is
+ * Unavailable or Not Submitted and the caller did not acknowledge the
+ * override. Nothing was assigned. The UI shows the matching warning and, only
+ * after the manager explicitly confirms, retries the same assignDriver call
+ * with `confirmAvailabilityOverride: true`.
+ */
+export class AvailabilityOverrideRequiredError extends RepositoryError {
+  readonly availabilityState: AvailabilityOverrideState;
+
+  constructor(availabilityState: AvailabilityOverrideState, options: { operation: string; cause?: unknown }) {
+    super(`${options.operation} requires an availability override (${availabilityState})`, { ...options, code: 'VD001' });
+    this.name = 'AvailabilityOverrideRequiredError';
+    this.availabilityState = availabilityState;
+  }
+
+  override get userMessage(): string {
+    return this.availabilityState === 'unavailable'
+      ? 'This driver marked themselves unavailable for this shift.'
+      : 'This driver has not submitted availability for this shift.';
+  }
+}
+
+/** Type guard so React code never needs `instanceof`, SQLSTATEs, or PostgREST error shapes. */
+export function isAvailabilityOverrideRequired(error: unknown): error is AvailabilityOverrideRequiredError {
+  return error instanceof AvailabilityOverrideRequiredError;
+}
+
+/**
+ * Stable reasons an assign/unassign can be refused. `rule_violation` groups the
+ * database's business-rule rejections that share one SQLSTATE (inactive
+ * driver, driver from a different resort, cancelled shift, over-long reason):
+ * the specific cause is in the first-party `userMessage`, which the database
+ * guarantees is friendly (never a raw constraint name -- DB-tested).
+ */
+export type RotaAssignmentErrorKind =
+  | 'duplicate_assignment'
+  | 'historical_shift'
+  | 'attendance_recorded'
+  | 'rule_violation'
+  | 'not_found'
+  | 'assignment_not_found';
+
+export class RotaAssignmentError extends RepositoryError {
+  readonly kind: RotaAssignmentErrorKind;
+  private readonly managerMessage: string;
+
+  /** `managerMessage` is first-party, manager-facing copy (from the database, or mirrored by the mock) -- safe to display. */
+  constructor(kind: RotaAssignmentErrorKind, managerMessage: string, options: { operation: string; code?: string; cause?: unknown }) {
+    super(`${options.operation} failed: ${managerMessage}`, options);
+    this.name = 'RotaAssignmentError';
+    this.kind = kind;
+    this.managerMessage = managerMessage;
+  }
+
+  override get userMessage(): string {
+    return this.managerMessage;
+  }
+}
+
+export function isRotaAssignmentError(error: unknown, kind?: RotaAssignmentErrorKind): error is RotaAssignmentError {
+  return error instanceof RotaAssignmentError && (kind === undefined || error.kind === kind);
+}
