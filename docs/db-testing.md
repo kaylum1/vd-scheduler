@@ -77,7 +77,7 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
 | `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of Manual Rota checkpoint MR-A this suite has **407 assertions**. That number will keep changing as the suite grows — don't
+As of Manual Rota checkpoint MR-D this suite has **407 assertions** across 14 files (unchanged since MR-A, which added `85_manual_rota_assignments.sql`; MR-B–MR-D added no migrations). That number will keep changing as the suite grows — don't
 chase a specific count; the point is that it stays genuinely comprehensive
 and, unlike its scratchpad predecessor, that it survives.
 

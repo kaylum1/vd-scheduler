@@ -303,6 +303,15 @@ describe('ManualRotaPanel: assigning', () => {
     expect(mockRotaAssignments).toHaveLength(0);
   });
 
+  it('every confirmation names the exact shift (name, day, time) and driver, since one page can hold many shifts', async () => {
+    renderRota();
+    const c = await findCard('Dinner');
+    openPicker(c);
+    clickAssign(c, 'Gianni');
+    const dialog = await screen.findByRole('dialog', { name: 'Assign Gianni?' });
+    expect(within(dialog).getByText('Dinner — Monday 7 Jan, 18:00–21:30')).toBeInTheDocument();
+  });
+
   it('15. an Unavailable driver opens the stronger warning', async () => {
     answer(dinnerId(FUTURE_WEEK), 'mock-gianni', 'unavailable');
     renderRota();

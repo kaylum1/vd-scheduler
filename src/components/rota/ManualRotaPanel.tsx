@@ -17,6 +17,12 @@ import { isAvailabilityOverrideRequired } from '../../repositories/errors';
 import { managerRotaKeys } from '../../repositories/queryKeys';
 import type { AssignDriverParams, ManagerRotaAssignment, ManagerRotaDriver, ManagerRotaShift, UnassignDriverParams } from '../../repositories/domain';
 
+/** "Dinner (2P) — Monday 19 Oct, 18:00–21:30": enough for a manager to know exactly which shift a dialog is about. */
+function describeShift(shift: ManagerRotaShift): string {
+  const day = parseISODate(shift.date);
+  return `${shift.name} — ${WEEKDAY_LABELS_FULL[(day.getDay() + 6) % 7]} ${formatDayLabel(day)}, ${shift.startTime}–${shift.endTime}`;
+}
+
 /**
  * The live Manual Rota: one resort + one operational week, rendered from the
  * manager repository (never Supabase directly), with assign / remove and
@@ -106,6 +112,7 @@ export function ManualRotaPanel({ resortId, weekStart }: { resortId: string | nu
       driverId: driver.driverId,
       driverName: driver.fullName,
       shiftName: shift.name,
+      shiftLabel: describeShift(shift),
       availability: availability === 'available' ? null : availability,
       coverage: coverage.isCovered ? { active: coverage.activeAssigned, required: coverage.required } : null,
     };

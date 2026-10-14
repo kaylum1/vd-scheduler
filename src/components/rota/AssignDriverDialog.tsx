@@ -26,6 +26,8 @@ export interface AssignDialogState {
   driverId: string;
   driverName: string;
   shiftName: string;
+  /** Names the exact shift this dialog is about, e.g. "Dinner (2P) — Monday 19 Oct, 18:00–21:30" (a page can hold many shifts). */
+  shiftLabel: string;
   availability: AvailabilityOverrideState | null;
   coverage: { active: number; required: number } | null;
 }
@@ -71,6 +73,8 @@ export function AssignDriverDialog({
         </>
       }
     >
+      <p className="assign-dialog__shift">{dialog.shiftLabel}</p>
+
       {dialog.coverage && (
         <p className="assign-dialog__line">
           <strong>{dialog.shiftName}</strong> already has the required coverage ({dialog.coverage.active} / {dialog.coverage.required} drivers assigned).{' '}

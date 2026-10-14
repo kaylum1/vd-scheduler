@@ -682,8 +682,9 @@ without breaking `MyRota.tsx`. Supabase mode is entirely unaffected (real
 ## J. Manual Rota assignment — database rules (MR-A)
 
 **Decided and implemented in the database (Manual Rota checkpoint MR-A).**
-The Manual Rota UI, repository layer, and weekly read model are **not** built
-yet — this section documents only what the database now guarantees.
+This section documents what the database guarantees; the repository / weekly
+read model (MR-B, section K) and the manager UI (MR-C, section L) are built on
+top of these rules and verified end to end in MR-D.
 
 **Manual assignment is deliberately more permissive than future Auto-Rota.**
 A manager has information the system doesn't (a WhatsApp message, a phone
@@ -885,10 +886,31 @@ manager edit never unpublishes it.
 horizontal overflow at 375px; dialogs fit the viewport; controls are
 touch-sized.
 
+**The dialog names the shift.** Every confirmation dialog opens with the exact
+shift it is about ("Dinner (2P) — Monday 26 Oct, 18:00–21:30"), because with
+several shifts per day a bare "Assign Gianni?" is ambiguous. (Added in MR-D after
+the real-Supabase walkthrough.) After a stale-data failure the dialog stays open
+with the server's message and the refreshed week behind it; Cancel closes it.
+
+**Keyboard and accessibility.** The shared `Modal` traps Tab / Shift+Tab inside
+the dialog (aria-modal), closes on Escape, and returns focus to the control that
+opened it (added in MR-D; tested in `components/ui/Modal.test.tsx`). Availability,
+coverage and Inactive are never colour-only: each has an icon or text plus a
+distinct border/underline. Assign / Remove buttons carry the driver and shift in
+their accessible name; the candidate list toggle exposes `aria-expanded`.
+
+**Known limitations (deliberate, not bugs):** nothing stops a driver being
+assigned to overlapping shifts on the same day (section J); Remove has no
+confirmation step; the availability read (shifts × drivers rows) is not
+paginated and the API caps a response at `max_rows = 1000`, so it needs paging
+before any one resort-week could approach that (section K); and the Dashboard and Driver My Rota are
+still Stage 1.1 mock data, so a manager's real assignments are not yet visible
+to drivers (Live Driver My Rota is the next checkpoint, ahead of any Publish UI).
+
 **Not part of this checkpoint:** Auto-Rota, Publish UI, Attendance UI, live
 Driver My Rota, live Dashboard.
 
 **Tests:** `components/rota/ManualRotaPanel.test.tsx`,
 `pages/manager/RotaAvailability.test.tsx`,
 `components/availability/ManagerAvailabilityPanel.test.tsx`,
-`components/rota/manualRotaBoundary.test.ts`.
+`components/rota/manualRotaBoundary.test.ts`, `components/ui/Modal.test.tsx`.
