@@ -24,9 +24,10 @@ export function StatusPill({
  * PRODUCT RULE (see docs/business-rules.md §A): a shift's coverage state is
  * one of two in normal operation, never conflated:
  *   - NO SERVICE: no shift_instance exists at all for that date — not this
- *     function's concern. Render a neutral/empty state instead (see
- *     EmptyShiftCell in components/rota/ShiftCard.tsx, and the "No shifts
- *     scheduled" branch in components/dashboard/TodayTomorrowPanel.tsx) —
+ *     function's concern. Render a neutral/empty state instead (see the
+ *     "No shifts are scheduled" state in components/rota/ManualRotaPanel.tsx,
+ *     and the "No shifts scheduled" branch in
+ *     components/dashboard/TodayTomorrowPanel.tsx) —
  *     never by calling coverageTone(0, 0), which would misreport it as red.
  *   - UNCOVERED / COVERED: a real shift_instance with a required count
  *     (mandatory since the Stage 2D staffing simplification -- always a

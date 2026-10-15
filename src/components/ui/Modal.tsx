@@ -14,15 +14,40 @@ interface ModalProps {
  * Minimal, dependency-free dialog: overlay + centred panel that fits small
  * viewports (max-height + internal scroll, see styles/components.css).
  * Closes on Escape and on overlay click; focuses the panel on mount so
- * Escape works immediately without requiring a prior tab/click.
+ * Escape works immediately without requiring a prior tab/click. Tab cycles
+ * inside the panel (aria-modal), and focus returns to the opener on close.
  */
+const FOCUSABLE = 'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
 export function Modal({ title, onClose, children, footer }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Remember the opener once, so a re-render with a new onClose never changes where focus returns to.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => opener?.focus();
+  }, []);
 
   useEffect(() => {
     panelRef.current?.focus();
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panelRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);

@@ -22,8 +22,14 @@ begin
   perform set_config('dbtest.safe_view_shift_type', v_shift_type_id::text, false);
   perform set_config('dbtest.safe_view_week_start', '2027-06-07', false);
 
+  -- Seeded as the database owner: an authenticated manager has no direct
+  -- write access to rota_assignments since Manual Rota MR-A (the RPCs are the
+  -- only client write path -- see 85_manual_rota_assignments.sql). This file
+  -- tests the driver-facing VIEW, not the write path.
+  perform pg_temp.as_postgres();
   insert into rota_assignments (shift_instance_id, driver_id, resort_id, assignment_source)
   values (v_shift_instance_id, current_setting('dbtest.driver_a_id')::uuid, v_resort_id, 'manual');
+  perform pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
 end $$;
 
 -- ---------------------------------------------------------------------

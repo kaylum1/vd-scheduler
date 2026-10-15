@@ -176,6 +176,30 @@ export interface MockRotaPublication {
 }
 export const mockRotaPublications: MockRotaPublication[] = [];
 
+/**
+ * Manual Rota (MR-B): mirrors rota_assignments. Empty by default and mutated
+ * only by MockRotaRepository.assignDriver/unassignDriver (the mock analogue of
+ * the assign_driver/unassign_driver RPCs -- the only write path). Tests that
+ * need a pre-existing assignment push a row directly, the same idiom as
+ * mockAvailabilitySubmissions above. There is deliberately no audit_log
+ * state here: the audit trail is a database concern, not a frontend mock one.
+ */
+export interface MockRotaAssignment {
+  id: string;
+  shiftInstanceId: string;
+  driverId: string;
+  resortId: string;
+  source: 'manual' | 'auto';
+  assignedAt: string;
+}
+export const mockRotaAssignments: MockRotaAssignment[] = [];
+
+let mockRotaAssignmentSeq = 0;
+export function nextMockRotaAssignmentId(): string {
+  mockRotaAssignmentSeq += 1;
+  return `mock-rota-assignment-${mockRotaAssignmentSeq}`;
+}
+
 let mockDriverSeq = 0;
 export function nextMockDriverId(): string {
   mockDriverSeq += 1;
@@ -252,4 +276,5 @@ export function resetMockFixturesForTesting(): void {
   mockAvailability.length = 0;
   mockAvailabilitySubmissions.length = 0;
   mockRotaPublications.length = 0;
+  mockRotaAssignments.length = 0;
 }

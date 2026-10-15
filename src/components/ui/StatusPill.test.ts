@@ -8,7 +8,8 @@ import { coverageLabel, coverageTone } from './StatusPill';
  * always describe a shift that already exists (required > 0, matching the
  * DB's shift_templates/shift_instances required_drivers > 0 constraint).
  * The "no shift at all" state is a *different* code path entirely
- * (EmptyShiftCell / "No shifts scheduled" — see ShiftCard.test.tsx), never
+ * (ManualRotaPanel's "No shifts are scheduled" empty state — see
+ * ManualRotaPanel.test.tsx), never
  * these functions called with filled=0, required=0.
  */
 describe('coverageTone / coverageLabel: uncovered styling requires a real, existing shift', () => {
@@ -32,7 +33,7 @@ describe('coverageTone / coverageLabel: uncovered styling requires a real, exist
     // these with required=0 (as a "no shift" cell mistakenly might) would
     // misreport a genuinely empty day as 'red'/"No coverage" — which is
     // exactly the bug the product rule forbids. The fix is that callers
-    // never do this (see EmptyShiftCell/"No shifts scheduled" instead), not
+    // never do this (see ManualRotaPanel's "No shifts are scheduled" instead), not
     // a defensive branch inside these pure functions.
     expect(coverageTone(0, 0)).toBe('red'); // would be wrong if ever used for "no shift" — callers must not do this
   });

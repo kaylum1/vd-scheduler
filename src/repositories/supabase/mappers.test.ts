@@ -13,12 +13,16 @@ import {
   mapMaterialiseShiftsResult,
   mapReopenWeekOutcome,
   mapResort,
+  mapRotaBuildAssignment,
+  mapRotaBuildAvailability,
+  mapRotaBuildDriver,
   mapShiftInstance,
   mapShiftMutationResult,
   mapSupportedLanguage,
   mapTemplateCancellationPreviewRow,
   mapTemplateRefreshPreviewRow,
   mapWeekAvailabilityStatus,
+  parseRotaAvailabilityState,
 } from './mappers';
 
 describe('mapResort', () => {
@@ -360,5 +364,34 @@ describe('Stage 2C RPC response mapping', () => {
       cancelled_shift_instance_ids: ['s1', 's2'],
     });
     expect(mapped).toEqual({ cancelledCount: 2, cancelledShiftInstanceIds: ['s1', 's2'] });
+  });
+});
+
+describe('manager rota mappers (Manual Rota MR-B)', () => {
+  it('mapRotaBuildDriver maps snake_case, preserving the active flag (inactive drivers must still resolve existing assignees)', () => {
+    expect(mapRotaBuildDriver({ id: 'd1', full_name: 'Gone Driver', is_active: false })).toEqual({ id: 'd1', fullName: 'Gone Driver', isActive: false });
+  });
+
+  it('mapRotaBuildAssignment maps the assignment and its source, and carries nothing about who/why', () => {
+    const mapped = mapRotaBuildAssignment({ id: 'a1', shift_instance_id: 's1', driver_id: 'd1', assignment_source: 'auto', assigned_at: '2030-01-01T10:00:00Z' });
+    expect(mapped).toEqual({ id: 'a1', shiftInstanceId: 's1', driverId: 'd1', source: 'auto', assignedAt: '2030-01-01T10:00:00Z' });
+    expect(Object.keys(mapped)).not.toContain('assignedBy');
+  });
+
+  it('mapRotaBuildAvailability maps an exact (shift, driver) answer', () => {
+    expect(mapRotaBuildAvailability({ shift_instance_id: 's1', driver_id: 'd1', status: 'unavailable' })).toEqual({
+      shiftInstanceId: 's1',
+      driverId: 'd1',
+      status: 'unavailable',
+    });
+  });
+
+  it('parseRotaAvailabilityState accepts exactly the three product states and rejects anything else', () => {
+    expect(parseRotaAvailabilityState('available')).toBe('available');
+    expect(parseRotaAvailabilityState('unavailable')).toBe('unavailable');
+    expect(parseRotaAvailabilityState('not_submitted')).toBe('not_submitted');
+    expect(parseRotaAvailabilityState('maybe')).toBeNull();
+    expect(parseRotaAvailabilityState('')).toBeNull();
+    expect(parseRotaAvailabilityState('AVAILABLE')).toBeNull();
   });
 });

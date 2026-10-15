@@ -1,93 +1,57 @@
 import React, { useState } from 'react';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { ResortWeekSection } from '../../components/rota/ResortWeekSection';
+import { ManualRotaPanel } from '../../components/rota/ManualRotaPanel';
 import { ManagerAvailabilityPanel } from '../../components/availability/ManagerAvailabilityPanel';
 import { WeekNav } from '../../components/rota/WeekNav';
-import { Button } from '../../components/ui/Button';
+import { useManagerWeekRota } from '../../components/rota/useManagerWeekRota';
+import { ResortSelector, useActiveResortSelection } from '../../components/ui/ResortSelector';
 import { StatusPill } from '../../components/ui/StatusPill';
-import { InlineNotice } from '../../components/ui/InlineNotice';
-import { addWeeks, startOfWeek } from '../../mock-data/date-utils';
+import { addWeeks, startOfWeek, toISODate } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
-import { resorts } from '../../mock-data/resorts';
-import type { ShiftInstance } from '../../types';
 
+/**
+ * Rota & Availability: the manager's weekly assignment screen.
+ *
+ * This page owns the ONE resort and ONE week for everything on it -- a single
+ * ResortSelector and a single WeekNav -- and passes both down. Neither panel
+ * keeps selection state of its own, so changing either control always updates
+ * Manual Rota and Availability together. Plain React state: nothing global.
+ *
+ * Draft/Published below is the REAL publication state of the selected
+ * resort + week (display only -- there is deliberately no Publish control
+ * yet; a published week stays editable by the manager).
+ */
 export function RotaAvailabilityPage() {
   // Rota week boundaries are operational (Europe/Zurich) data — see
   // src/lib/operationalTime.ts — not the viewer's browser timezone.
   const [weekStart, setWeekStart] = useState(() => startOfWeek(getOperationalToday()));
-  const [lastAction, setLastAction] = useState<string | null>(null);
+  const weekStartIso = toISODate(weekStart);
 
-  // Demo rule: only the current week is treated as already published.
-  const isCurrentWeek = weekStart.getTime() === startOfWeek(getOperationalToday()).getTime();
+  const { activeResorts, selectedResortId, setSelectedResortId } = useActiveResortSelection();
 
-  const handleManageShift = (shift: ShiftInstance) => {
-    setLastAction(
-      `Opened "${shift.name}" (${shift.startTime}–${shift.endTime}) on ${shift.date} for editing — override flow is not implemented in Stage 1.`
-    );
-  };
+  // Same hook + key as the Manual Rota panel, so this is one cache entry, not a second fetch.
+  const rotaQuery = useManagerWeekRota(selectedResortId, weekStartIso);
+  const publication = rotaQuery.data ? (rotaQuery.data.isPublished ? 'Published' : 'Draft') : null;
 
   return (
     <div className="page">
-      <PageHeader
-        title="Rota & Availability"
-        subtitle="Live driver availability below; rota assignment/publishing arrives in a later checkpoint."
-      />
+      <PageHeader title="Rota & Availability" subtitle="Assign drivers to shifts and see who is available, for one resort and week at a time." />
 
-      {/* ---------------------------------------------------------------
-          Stage 3: live driver availability, real data via the repository
-          layer. This is the only functional part of this page today.
-          --------------------------------------------------------------- */}
-      <ManagerAvailabilityPanel />
+      <ResortSelector resorts={activeResorts} selectedResortId={selectedResortId} onSelect={setSelectedResortId} />
 
-      {/* ---------------------------------------------------------------
-          Everything below remains Stage 1.1 mock data -- a preview of the
-          future Rota assignment view, not yet backed by real assignments/
-          publication. Kept visually and functionally separate from the
-          live Availability panel above so it can never be mistaken for
-          real assignment state.
-          --------------------------------------------------------------- */}
-      <div style={{ marginTop: 28 }}>
-        <PageHeader
-          title="Rota (preview)"
-          subtitle="Monday–Sunday view across all resorts. Not yet backed by real assignments — assignment and publishing are a future checkpoint."
-          actions={
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <WeekNav
-                weekStart={weekStart}
-                onPrev={() => setWeekStart((d) => addWeeks(d, -1))}
-                onNext={() => setWeekStart((d) => addWeeks(d, 1))}
-                onThisWeek={() => setWeekStart(startOfWeek(getOperationalToday()))}
-                statusChip={
-                  <StatusPill tone={isCurrentWeek ? 'green' : 'grey'}>
-                    {isCurrentWeek ? 'Published' : 'Draft'}
-                  </StatusPill>
-                }
-              />
-              <Button variant="primary" disabled={isCurrentWeek}>
-                {isCurrentWeek ? 'Published' : 'Publish rota'}
-              </Button>
-            </div>
-          }
+      <div className="rota-toolbar">
+        <WeekNav
+          weekStart={weekStart}
+          onPrev={() => setWeekStart((d) => addWeeks(d, -1))}
+          onNext={() => setWeekStart((d) => addWeeks(d, 1))}
+          onThisWeek={() => setWeekStart(startOfWeek(getOperationalToday()))}
+          statusChip={publication ? <StatusPill tone={publication === 'Published' ? 'green' : 'grey'}>{publication}</StatusPill> : undefined}
         />
-
-        <InlineNotice tone="info">This preview uses Stage 1.1 demo data, independent of the live Availability panel above.</InlineNotice>
-
-        {lastAction && (
-          <div className="badge" style={{ display: 'block', margin: '14px 0', padding: '8px 12px', fontSize: 12 }}>
-            {lastAction}
-          </div>
-        )}
-
-        {resorts.map((resort) => (
-          <ResortWeekSection
-            key={resort.id}
-            resort={resort}
-            weekStart={weekStart}
-            isPublished={isCurrentWeek}
-            onManageShift={handleManageShift}
-          />
-        ))}
       </div>
+
+      <ManualRotaPanel resortId={selectedResortId} weekStart={weekStartIso} />
+
+      <ManagerAvailabilityPanel resortId={selectedResortId} weekStart={weekStartIso} />
     </div>
   );
 }

@@ -5,6 +5,7 @@
  */
 
 import type { Database } from '../../types/database.generated';
+import type { RotaBuildAssignment, RotaBuildAvailability, RotaBuildDriver } from '../managerRotaModel';
 import type {
   ApplyTemplateCancellationResult,
   ApplyTemplateRefreshResult,
@@ -19,6 +20,8 @@ import type {
   MaterialiseShiftsResult,
   ReopenWeekOutcome,
   ResortRecord,
+  RotaAssignmentSource,
+  RotaAvailabilityState,
   ShiftBasePayRuleRecord,
   ShiftInstanceRecord,
   ShiftTemplateRecord,
@@ -383,4 +386,42 @@ export function mapCorrectDriverDeliveryRateResult(row: CorrectDriverDeliveryRat
     effectiveFrom: row.effective_from,
     effectiveTo: row.effective_to,
   };
+}
+
+// ---------------------------------------------------------------------
+// Manual Rota (MR-B). Each takes only the columns the manager week read
+// selects -- notably NOT assigned_by, and nothing from audit_log: the
+// override reason / audit context never enters the rota read model.
+// ---------------------------------------------------------------------
+type RotaAssignmentRow = Database['public']['Tables']['rota_assignments']['Row'];
+
+export function mapRotaBuildDriver(row: Pick<DriverRow, 'id' | 'full_name' | 'is_active'>): RotaBuildDriver {
+  return { id: row.id, fullName: row.full_name, isActive: row.is_active };
+}
+
+export function mapRotaBuildAssignment(
+  row: Pick<RotaAssignmentRow, 'id' | 'shift_instance_id' | 'driver_id' | 'assignment_source' | 'assigned_at'>
+): RotaBuildAssignment {
+  return {
+    id: row.id,
+    shiftInstanceId: row.shift_instance_id,
+    driverId: row.driver_id,
+    // CHECK-constrained to ('manual','auto') at the DB level (migration 08).
+    source: row.assignment_source as RotaAssignmentSource,
+    assignedAt: row.assigned_at,
+  };
+}
+
+export function mapRotaBuildAvailability(row: Pick<AvailabilityRow, 'shift_instance_id' | 'driver_id' | 'status'>): RotaBuildAvailability {
+  return {
+    shiftInstanceId: row.shift_instance_id,
+    driverId: row.driver_id,
+    // CHECK-constrained to ('available','unavailable'); "not submitted" is never stored.
+    status: row.status as RotaBuildAvailability['status'],
+  };
+}
+
+/** assign_driver reports exactly these three states; anything else is a contract break, not a value to pass along. */
+export function parseRotaAvailabilityState(value: string): RotaAvailabilityState | null {
+  return value === 'available' || value === 'unavailable' || value === 'not_submitted' ? value : null;
 }

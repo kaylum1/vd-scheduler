@@ -32,7 +32,12 @@ import type {
   DriverOnfleetMappingRecord,
   DriverRecord,
   DriverShiftAvailability,
+  AssignDriverParams,
+  AssignDriverResult,
   DriverVisibleAssignment,
+  ManagerWeekRota,
+  UnassignDriverParams,
+  UnassignDriverResult,
   DriverVisibleShift,
   MaterialiseShiftsResult,
   ReopenWeekOutcome,
@@ -253,6 +258,53 @@ export interface AvailabilityRepository {
 export interface RotaRepository {
   /** Driver-safe "My Rota": own published assignments only, no colleague identities. */
   listDriverVisibleAssignments(driverId: string): Promise<DriverVisibleAssignment[]>;
+
+  // ---------------------------------------------------------------------
+  // Manager-only (Manual Rota MR-B). Everything below carries manager-only
+  // data (required_drivers, every resort driver, every driver's
+  // availability) and must never be used by a driver-facing page -- drivers
+  // keep the safe repositories/views above and in AvailabilityRepository.
+  //
+  // WRITES: the database owns every assignment rule (MR-A). A manager can
+  // only write through the assign_driver / unassign_driver RPCs -- direct
+  // INSERT/UPDATE/DELETE on rota_assignments is revoked -- so the two write
+  // methods below are RPC wrappers only and re-implement nothing. Failures
+  // surface as typed errors (see AvailabilityOverrideRequiredError and
+  // RotaAssignmentError in ./errors); callers never see SQLSTATEs.
+  // ---------------------------------------------------------------------
+
+  /**
+   * One resort + one operational Monday-Sunday week, composed from a small
+   * CONSTANT number of authorised reads (never one per driver or shift).
+   * A week with no service returns a valid empty model, never an error.
+   * Query-key convention: managerRotaKeys.week(resortId, weekStart).
+   *
+   * Scaling note: the availability read returns shifts x drivers rows for
+   * the week, and the API caps a response at max_rows = 1000 (supabase/
+   * config.toml). That is comfortably above any current resort; revisit
+   * (page the read) only if a single resort-week could approach it.
+   */
+  getManagerWeekRota(params: { resortId: string; weekStart: string }): Promise<ManagerWeekRota>;
+
+  /**
+   * Atomic (assign_driver). Always manual. The server reads the driver's
+   * CURRENT availability itself: Available assigns immediately; Unavailable /
+   * Not Submitted reject with AvailabilityOverrideRequiredError (carrying
+   * that state, nothing inserted) unless `confirmAvailabilityOverride` is
+   * true -- the same method is used for the confirmed retry. Also rejected:
+   * inactive driver, different resort, duplicate, a shift dated before the
+   * operational today. Over-assignment (more than required_drivers) and
+   * published current/future weeks are allowed.
+   */
+  assignDriver(params: AssignDriverParams): Promise<AssignDriverResult>;
+
+  /**
+   * Atomic (unassign_driver). Removes exactly one assignment. Rejected: not
+   * assigned, a shift dated before the operational today, or attendance
+   * already recorded for that driver+shift. Allowed in a published
+   * current/future week.
+   */
+  unassignDriver(params: UnassignDriverParams): Promise<UnassignDriverResult>;
 }
 
 /**

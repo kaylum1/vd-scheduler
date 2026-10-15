@@ -1,13 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardHeader } from '../ui/Card';
 import { StatusPill, type StatusTone } from '../ui/StatusPill';
 import { EmptyState } from '../ui/EmptyState';
-import { ResortSelector, useActiveResortSelection } from '../ui/ResortSelector';
-import { WeekNav } from '../rota/WeekNav';
+import { useResortsQuery } from '../ui/ResortSelector';
 import { IconCalendar, IconClock, IconLock } from '../ui/icons';
-import { addDays, formatDayLabel, parseISODate, startOfWeek, toISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
-import { getOperationalToday } from '../../lib/operationalTime';
+import { formatDayLabel, parseISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
 import { getRepositories } from '../../repositories';
 import type { AvailabilitySubmissionSummary, DriverWeekAvailabilityState } from '../../repositories/domain';
 
@@ -31,26 +29,34 @@ const STATE_TONE: Record<DriverWeekAvailabilityState, StatusTone> = {
  * Stage 3: manager-facing driver availability visibility -- whether each
  * driver at the chosen resort has submitted availability for the chosen
  * week, and (on request) their actual per-shift answers. Read-only: no
- * assignment/Auto-Rota/Publish functionality lives here (that is a later
- * checkpoint) -- see docs/business-rules.md.
+ * assignment/Auto-Rota/Publish functionality lives here -- assignment is the
+ * Manual Rota panel's job (components/rota/ManualRotaPanel.tsx).
+ *
+ * The resort and week come from the page (RotaAvailability), which owns the one
+ * shared selector and week navigation -- this panel keeps no selection state of
+ * its own. It does not share data with the Manual Rota panel either: the two
+ * share only the page's selection.
  */
-export function ManagerAvailabilityPanel() {
-  const todayWeekStartIso = toISODate(startOfWeek(getOperationalToday()));
-  const [weekStartIso, setWeekStartIso] = useState(todayWeekStartIso);
+export function ManagerAvailabilityPanel({ resortId, weekStart }: { resortId: string | null; weekStart: string }) {
   const [expandedDriverId, setExpandedDriverId] = useState<string | null>(null);
-  const weekStartDate = parseISODate(weekStartIso);
 
-  const { activeResorts, selectedResortId, setSelectedResortId, selectedResort } = useActiveResortSelection();
+  // A driver detail row belongs to one resort + week; collapse it when either changes.
+  useEffect(() => {
+    setExpandedDriverId(null);
+  }, [resortId, weekStart]);
+
+  const resortsQuery = useResortsQuery();
+  const resortName = resortsQuery.data?.find((r) => r.id === resortId)?.name ?? null;
 
   const summaryQuery = useQuery({
-    queryKey: ['availability', 'managerSummary', selectedResortId, weekStartIso],
-    queryFn: () => getRepositories().availability.listAvailabilitySubmissionStatus(selectedResortId as string, weekStartIso),
-    enabled: !!selectedResortId,
+    queryKey: ['availability', 'managerSummary', resortId, weekStart],
+    queryFn: () => getRepositories().availability.listAvailabilitySubmissionStatus(resortId as string, weekStart),
+    enabled: !!resortId,
   });
 
   const detailQuery = useQuery({
-    queryKey: ['availability', 'managerDetail', expandedDriverId, weekStartIso],
-    queryFn: () => getRepositories().availability.getResortWeekAvailability(expandedDriverId as string, weekStartIso),
+    queryKey: ['availability', 'managerDetail', expandedDriverId, weekStart],
+    queryFn: () => getRepositories().availability.getResortWeekAvailability(expandedDriverId as string, weekStart),
     enabled: !!expandedDriverId,
   });
 
@@ -58,41 +64,10 @@ export function ManagerAvailabilityPanel() {
 
   return (
     <>
-      <ResortSelector
-        resorts={activeResorts}
-        selectedResortId={selectedResortId}
-        onSelect={(resortId) => {
-          setSelectedResortId(resortId);
-          // Different semantics from the other two consumers: switching
-          // resort must also collapse any expanded driver detail row, since
-          // that detail belongs to a driver at the *previous* resort.
-          setExpandedDriverId(null);
-        }}
-      />
-
       <Card style={{ marginBottom: 16 }}>
-        <CardHeader
-          title={`Availability${selectedResort ? ` — ${selectedResort.name}` : ''}`}
-          action={
-            <WeekNav
-              weekStart={weekStartDate}
-              onPrev={() => {
-                setWeekStartIso(toISODate(addDays(weekStartDate, -7)));
-                setExpandedDriverId(null);
-              }}
-              onNext={() => {
-                setWeekStartIso(toISODate(addDays(weekStartDate, 7)));
-                setExpandedDriverId(null);
-              }}
-              onThisWeek={() => {
-                setWeekStartIso(todayWeekStartIso);
-                setExpandedDriverId(null);
-              }}
-            />
-          }
-        />
+        <CardHeader title={`Availability${resortName ? ` — ${resortName}` : ''}`} />
 
-        {!selectedResortId ? (
+        {!resortId ? (
           <EmptyState icon={<IconCalendar />} title="Choose a resort to see driver availability." />
         ) : summaryQuery.isLoading ? (
           <div className="config-loading">Loading availability…</div>

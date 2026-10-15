@@ -422,3 +422,111 @@ export interface DriverDeliveryRateRecord {
   effectiveFrom: string;
   effectiveTo: string | null;
 }
+
+// ---------------------------------------------------------------------
+// Manual Rota (MR-B): the MANAGER weekly rota read model and assignment
+// operations. Manager-only by construction -- it carries required_drivers,
+// every resort driver's identity, and every driver's availability, none of
+// which a driver session may ever see. Never reuse these shapes for driver
+// pages: Driver My Rota / Driver Availability keep their own safe
+// repositories/views (DriverVisibleAssignment / DriverVisibleShift).
+// ---------------------------------------------------------------------
+
+/**
+ * A driver's availability for one exact shift_instance, as the product sees
+ * it. 'not_submitted' is NEVER a stored status -- it is simply the absence of
+ * an availability row. Never inferred from week-level confirmation state.
+ */
+export type RotaAvailabilityState = 'available' | 'unavailable' | 'not_submitted';
+
+/** Mirrors rota_assignments.assignment_source. Manual Rota only ever writes 'manual'; 'auto' is reserved for future Auto-Rota. */
+export type RotaAssignmentSource = 'manual' | 'auto';
+
+/** A driver who may be offered as a NEW assignment: active, at the selected resort. */
+export interface ManagerRotaDriver {
+  driverId: string;
+  fullName: string;
+}
+
+/**
+ * One existing assignment, with its driver already resolved -- including a
+ * driver who has since become inactive (their assignment is never silently
+ * dropped). An inactive assignee does NOT count toward required_drivers
+ * (see lib/rotaCoverage.ts) but stays visible so the manager can replace or
+ * remove them. Deliberately carries NO audit context / override reason: that
+ * is audit data (audit_log.context), never part of the rota read model.
+ */
+export interface ManagerRotaAssignment {
+  assignmentId: string;
+  driverId: string;
+  driverName: string;
+  isDriverActive: boolean;
+  source: RotaAssignmentSource;
+  assignedAt: string;
+}
+
+export interface ManagerRotaShift {
+  /** Identity. Never use the display name (or a "(1P)"/"(2P)" suffix) to identify or staff a shift. */
+  shiftInstanceId: string;
+  /** The stable Shift (shift_type) this instance belongs to. */
+  shiftTypeId: string;
+  /** ISO date, YYYY-MM-DD. */
+  date: string;
+  name: string;
+  /** Wall-clock 'HH:MM' (seconds stripped so both providers agree). Never round-trip through a Date -- see lib/operationalTime.ts. */
+  startTime: string;
+  endTime: string;
+  /** A coverage MINIMUM, not a capacity. */
+  requiredDrivers: number;
+  /** Every assignment on this shift, active and inactive drivers alike, ordered by assignedAt. */
+  assignments: ManagerRotaAssignment[];
+  /** One entry per ACTIVE candidate driver (assigned or not). Inactive assignees have no entry -- their name/status live on the assignment itself. */
+  availabilityByDriver: Record<string, RotaAvailabilityState>;
+}
+
+/**
+ * Everything the future Manual Rota screen needs for one resort + one
+ * Monday-Sunday week. Coverage is deliberately NOT stored or fetched: derive
+ * it with lib/rotaCoverage.ts.
+ */
+export interface ManagerWeekRota {
+  resortId: string;
+  /** The operational Monday, ISO YYYY-MM-DD. */
+  weekStart: string;
+  /** Whether this resort/week currently has an active publication. Read-only information: managers may still edit a published current/future week. */
+  isPublished: boolean;
+  /** Active drivers at the resort -- the ONLY people to offer as new assignments. Sorted by name. */
+  candidateDrivers: ManagerRotaDriver[];
+  /** Active shift instances for the week, ordered by date, then sort order, then start time. Empty for a week with no service. */
+  shifts: ManagerRotaShift[];
+}
+
+export interface AssignDriverParams {
+  shiftInstanceId: string;
+  driverId: string;
+  /**
+   * Acknowledges an Unavailable / Not Submitted driver. Leave false/omitted on
+   * the first attempt: the server decides the CURRENT availability itself and,
+   * if an override is needed, rejects with AvailabilityOverrideRequiredError
+   * (carrying that state). Retry with true only after the manager confirms.
+   * The caller never supplies an availability state -- there is no such parameter.
+   */
+  confirmAvailabilityOverride?: boolean;
+  /** Optional manager note (trimmed; empty = none; max 500 chars). Recorded in the audit trail only. */
+  reason?: string | null;
+}
+
+export interface AssignDriverResult {
+  assignmentId: string;
+  /** The availability state the server actually used when it made the assignment. */
+  availabilityState: RotaAvailabilityState;
+}
+
+export interface UnassignDriverParams {
+  shiftInstanceId: string;
+  driverId: string;
+}
+
+export interface UnassignDriverResult {
+  assignmentId: string;
+}

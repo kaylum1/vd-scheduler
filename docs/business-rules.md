@@ -53,9 +53,12 @@ should expect to see on data created since. New Shifts can never produce it.
 - [`coverageTone`/`coverageLabel`](../src/components/ui/StatusPill.tsx) —
   pure functions that render coverage for a shift *already known to exist*.
   Never called for a "no shift" cell.
-- [`ShiftCard` vs `EmptyShiftCell`](../src/components/rota/ShiftCard.tsx) —
-  `WeekGrid` renders `ShiftCard` only when a real shift exists for that
-  row/day, `EmptyShiftCell` (neutral, dashed border, no text) otherwise.
+- [`ManualRotaPanel`](../src/components/rota/ManualRotaPanel.tsx) — renders
+  only the shift instances the repository returns, grouped by day (no
+  fabricated empty days); a week with none shows the neutral "No shifts are
+  scheduled for this week." and never "Uncovered". Coverage per shift comes
+  from the shared [`getShiftCoverage`](../src/lib/rotaCoverage.ts) (active
+  assignees only — see section K).
 - [`TodayTomorrowPanel`](../src/components/dashboard/TodayTomorrowPanel.tsx) —
   renders "No shifts scheduled" (muted chip) when a resort has zero shifts
   that day, and only computes/renders "No coverage" per-shift for shifts
@@ -70,18 +73,19 @@ should expect to see on data created since. New Shifts can never produce it.
   mandatory at Shift-creation time, so it can never be missing.
 
 Tests: [`StatusPill.test.ts`](../src/components/ui/StatusPill.test.ts),
-[`ShiftCard.test.tsx`](../src/components/rota/ShiftCard.test.tsx).
+[`ManualRotaPanel.test.tsx`](../src/components/rota/ManualRotaPanel.test.tsx).
 
-**Known temporary inconsistency (not a bug to fix here):** Manager
-Dashboard/Rota are still Stage 1.1's mock data (`src/mock-data/shifts.ts`),
-which currently fabricates a Dinner shift for every resort every day —
-including Verbier, which the *live* Configuration page (Stage 2D Checkpoint
-1) correctly shows has zero configured shift types. This is why Verbier can
-currently show "No shift types yet" in Configuration while the mock Rota
-still shows a (fabricated, uncovered) Dinner shift. This is a mock/live data
-source mismatch, not a presentation-logic bug, and is **not** to be papered
-over by mixing real Supabase shifts into the mock rota. It resolves itself
-naturally once Manager Rota is migrated to live data (a future checkpoint).
+**Known temporary inconsistency (not a bug to fix here):** the Manager
+**Dashboard** and the **Driver My Rota** page are still Stage 1.1's mock data
+(`src/mock-data/shifts.ts`), which fabricates a Dinner shift for every resort
+every day — including Verbier, which the *live* Configuration page and the
+*live* Manual Rota (Rota & Availability) correctly show has no shifts. So the
+Dashboard can show an uncovered Verbier Dinner while Manual Rota shows "No
+shifts are scheduled for this week." This is a mock/live data source
+mismatch, not a presentation-logic bug, and is **not** to be papered over by
+mixing real shifts into the mock pages. The Manager Rota itself is now live
+(sections J–L); Driver My Rota is planned to go live **before** any Publish
+UI is built, and the Dashboard in a later checkpoint.
 
 ---
 
@@ -163,8 +167,13 @@ No schema change is being made for this in Checkpoint 1.1 — flagged here
 for the checkpoint that actually builds manual rota editing to decide against
 the concrete UI it's building at that point.
 
-**Implemented:** nothing yet. This section is a recorded requirement only —
-belongs to the future "real Manual Rota" checkpoint.
+**Implemented (database layer only — Manual Rota MR-A):** the rules above are
+now enforced in the database by `assign_driver` / `unassign_driver` — see
+section J. The unavailable-driver warning/override is DB-enforced, a manager
+may edit assignments in a published current/future week without unpublishing
+it, and every change is audited. The manager UI for this is implemented (MR-C,
+section L). The optional override reason, which the schema note above left
+open, lives in `audit_log.context`, not on `rota_assignments`.
 
 ---
 
@@ -622,10 +631,11 @@ driver's actual per-shift answers. This is composed from plain authorized
 reads (the manager role already has full SELECT on `drivers`/
 `shift_instances`/`availability`/`availability_submissions`/
 `rota_publications`) — no new RPC or migration. **No assignment, Auto-
-Rota, or Publish control exists in this manager view** — those remain
-future checkpoints; the pre-existing Stage 1.1 mock Rota grid is kept
-separate and clearly labelled as a preview, never blended with this live
-panel.
+Rota, or Publish control exists in this manager view** — assignment lives in
+the separate Manual Rota panel on the same page (section L), and the Stage 1.1
+mock Rota preview that used to sit below it has been removed. As of MR-C this
+panel is driven by `resortId`/`weekStart` props from the page and keeps no
+selection state of its own.
 
 **I. Future Auto-Rota's eligibility input (design constraint, not built).**
 Auto-Rota (§H above) must be able to query, per shift_instance: which
@@ -642,8 +652,7 @@ shape directly; nothing further is needed to prepare for it.
 `getResortWeekAvailability`), implemented for both providers.
 `pages/driver/Availability.tsx` (live, replacing the Stage 1.1 mock
 version entirely) and `components/availability/ManagerAvailabilityPanel.tsx`
-(new, mounted inside `pages/manager/RotaAvailability.tsx` above the
-still-mock Rota preview).
+(new, mounted inside `pages/manager/RotaAvailability.tsx`).
 
 **Known mock-mode limitation:** the mock provider has no persisted
 `shift_instances` (they're generated fresh from templates on every read),
@@ -667,3 +676,241 @@ The live Availability page instead resolves its own id-space bridge via
 doc comment for why the translation couldn't live in `AuthContext` itself
 without breaking `MyRota.tsx`. Supabase mode is entirely unaffected (real
 `driver_id`/`resort_id` throughout, from `resolveCurrentUser()`).
+
+---
+
+## J. Manual Rota assignment — database rules (MR-A)
+
+**Decided and implemented in the database (Manual Rota checkpoint MR-A).**
+This section documents what the database guarantees; the repository / weekly
+read model (MR-B, section K) and the manager UI (MR-C, section L) are built on
+top of these rules and verified end to end in MR-D.
+
+**Manual assignment is deliberately more permissive than future Auto-Rota.**
+A manager has information the system doesn't (a WhatsApp message, a phone
+call), so manager control stays authoritative. Future Auto-Rota will treat
+both Unavailable *and* Not Submitted as ineligible (section H §F); manual
+assignment may override either, after an explicit acknowledgement.
+
+**Writes go through two atomic RPCs — and only through them.**
+`assign_driver(p_shift_instance_id, p_driver_id, p_confirm_availability_override
+default false, p_reason default null)` and `unassign_driver(p_shift_instance_id,
+p_driver_id)`, both `SECURITY DEFINER` + `assert_active_manager()`. Managers
+keep `SELECT` on `rota_assignments` (the weekly read model needs it) but have
+**no** direct `INSERT`/`UPDATE`/`DELETE`: the grants are revoked and the
+`FOR ALL` policy was replaced by a `SELECT`-only one, so no client path can
+bypass the rules below. Drivers still have no base-table access at all (they
+use `driver_visible_assignments`, unchanged). `anon` cannot execute either RPC.
+
+**What a manager may do:** assign an Available driver; assign a Not Submitted
+or Unavailable driver *after explicit acknowledgement*; assign more drivers than
+`required_drivers` (a minimum, not a capacity — no DB headcount cap); edit a
+**published** current/future week (the week stays published; `rota_publications`
+is never touched; the change is audited).
+
+**What a manager may not do:** assign an inactive driver; assign across resorts;
+assign the same driver to the same shift twice (the existing
+`unique(shift_instance_id, driver_id)` stays the authoritative guard); assign to
+a cancelled shift; assign **or** unassign a shift dated before the resort's
+operational today (Europe/Zurich via `operational_today`, never `current_date`;
+today and future are editable); unassign a driver once **any** attendance row
+exists for that driver+shift (attendance status is deliberately not inspected —
+correcting recorded attendance is a separate, future, audited workflow).
+
+**Availability override is server-side, never trusted from the client.** The RPC
+reads the driver's *current* availability itself at write time (`available` /
+`unavailable` / `not_submitted` = no row) and accepts no availability parameter.
+If the state is not `available` and `p_confirm_availability_override` is false,
+**nothing is inserted** and it raises SQLSTATE `VD001` with `DETAIL` = the
+current state; the (future) client shows the matching warning and, only after the
+manager confirms, retries with the flag set — and the server re-reads
+availability again. This makes a stale page safe: a driver who flips to
+Unavailable after the manager loaded the page cannot be silently assigned.
+
+**Stable error contract** (the repository/UI key off SQLSTATE and `DETAIL`, not
+message text): `42501` not a manager · `P0002` shift/driver/assignment not found
+· `23514` business-rule rejection (cancelled shift, inactive driver, different
+resort, reason > 500 chars) · `23505` already assigned · `55006` locked, with
+`DETAIL` `historical_shift` or `attendance_recorded` · `VD001` override required,
+`DETAIL` `unavailable` | `not_submitted`.
+
+**Optional override reason → `audit_log.context`, not the assignment row.**
+`p_reason` is optional (trimmed, empty = none, max 500). New nullable column
+`audit_log.context jsonb`; the generic audit trigger copies the transaction-local
+setting `app.audit_context` into it. Assign records `operation`,
+`availability_state`, `availability_override` (true only when the manager
+actually overrode Unavailable/Not Submitted) and `reason` when given; unassign
+records `operation`. The RPC sets the context immediately before its single
+audited write and clears it immediately after, a failed statement's
+subtransaction rollback reverts it, and a malformed context is recorded as NULL
+rather than ever failing a write — so a later unrelated audited write in the
+same transaction can never inherit it (regression-tested). `audit_log` is
+manager-readable only, so override reasons are never visible to drivers.
+
+**Inactive assignees.** Deactivating a driver does not delete or rewrite their
+existing assignment, and a manager can still unassign them. A *new* assignment
+of an inactive driver is rejected. An inactive assignee does not count toward
+coverage — see section K.
+
+**Known, deliberately unaddressed:** nothing prevents one driver being assigned
+to overlapping shifts on the same day. No overlap rule exists anywhere in the
+schema; recorded as a possible future product decision/warning, not a blocker.
+
+**Tests:** `supabase/tests/85_manual_rota_assignments.sql`.
+
+---
+
+## K. Manual Rota — repository and read model (MR-B)
+
+**Implemented (data layer — MR-B).** The typed repository/domain layer for the
+manager's weekly rota. The UI built on it is section L.
+
+**Manager week read model** — `RotaRepository.getManagerWeekRota({ resortId,
+weekStart })` → `ManagerWeekRota { isPublished, candidateDrivers, shifts[] }`
+(`repositories/domain.ts`). Each shift carries `shiftInstanceId`, date, name,
+`HH:MM` times, `requiredDrivers`, its `assignments[]`, and `availabilityByDriver`.
+Assembled by one pure function (`repositories/managerRotaModel.ts`) fed by both
+providers, so grouping/ordering/derivation cannot drift between them. The
+Supabase provider uses at most five authorised reads (three in parallel, then
+two filtered by the week's shift ids), never one per driver or shift; a week
+with no service skips the second stage and returns a valid empty model. The
+cache key is `managerRotaKeys.week(resortId, weekStart)`. *Scaling watch item:*
+the availability read returns shifts × drivers rows and the API caps a response
+at `max_rows = 1000` — comfortably above any current resort; page the read only
+if one resort-week could approach it.
+
+**Two driver concepts.** `candidateDrivers` = *active* drivers at the resort, the
+only people to offer as new assignments. An existing assignment carries its own
+resolved `driverName` / `isDriverActive`, so an assignee who has since been
+deactivated is still shown (and removable), never dropped. Availability is
+derived per exact shift instance: row `available`/`unavailable`, **no row =
+`not_submitted`** (never a stored status, never inferred from week confirmation).
+The model carries no audit context or override reason.
+
+**Coverage is derived, never stored** (`lib/rotaCoverage.ts`): *active*
+assignments `<` `required_drivers` → uncovered; `>=` → covered; above-required
+stays covered. **An inactive assignee does not count** — e.g. required 2 with one
+active and one inactive assignee is uncovered, so the manager sees the gap and
+replaces them.
+
+**Repository error contract — callers never see `VD001`, SQLSTATEs or PostgREST
+shapes.** `assignDriver` / `unassignDriver` are RPC wrappers only (the adapter
+never writes `rota_assignments` directly — tested). The Supabase adapter
+(`supabase/rotaErrors.ts`) is the single place that translates the database's
+contract (section J) into typed errors in `repositories/errors.ts`:
+`AvailabilityOverrideRequiredError { availabilityState: 'unavailable' |
+'not_submitted' }` (guard: `isAvailabilityOverrideRequired`) and
+`RotaAssignmentError { kind }` with kinds `duplicate_assignment`,
+`historical_shift`, `attendance_recorded`, `rule_violation`, `not_found`,
+`assignment_not_found` (guard: `isRotaAssignmentError`). The override state is
+read from the machine-readable `DETAIL`, never parsed from message text; an
+unrecognised `DETAIL` falls back to a generic error rather than being mistaken
+for a known state. The override flow reuses one method: call `assignDriver`
+without `confirmAvailabilityOverride`; on `AvailabilityOverrideRequiredError`
+show the matching warning and, only after the manager confirms, call it again
+with `confirmAvailabilityOverride: true`. The caller never supplies an
+availability state. *Known limit:* the database reports inactive driver, other
+resort, cancelled shift and an over-long reason under one SQLSTATE (`23514`) with
+no `DETAIL`, so they share `kind: 'rule_violation'` and are told apart only by the
+database's first-party `userMessage`. Distinct kinds would need a small DETAIL
+addition to the RPCs (a new migration) — deliberately not done.
+
+**Mock provider differences** (documented in `repositories/mock/rota.ts`): it
+reproduces the database's checks, order, typed errors and message text, but has
+**no attendance** (the attendance guard is database-only), **no audit** (the
+reason is accepted and discarded), and **no cancelled shifts**. Mock
+shift-instance ids are `${templateId}-${date}` — stable across reads, but a mock
+`reviseShift` that recreates the template changes them, orphaning mock
+assignments; the real database keeps instance identity.
+
+**Privacy boundary.** This model is manager-only (`required_drivers`, every
+resort driver, everyone's availability). Driver pages keep their own safe
+repositories/views; never reuse these shapes for them.
+
+**Tests:** `lib/rotaCoverage.test.ts`, `repositories/managerRotaModel.test.ts`,
+`repositories/supabase/{rota,rotaErrors,mappers}.test.ts`,
+`repositories/mock/rota.test.ts`.
+
+---
+
+## L. Manual Rota — manager UI (MR-C)
+
+**Implemented.** `Rota & Availability` (`pages/manager/RotaAvailability.tsx`) is
+the manager's real weekly assignment screen, built only on `RotaRepository`
+(section K) — never Supabase directly (import-boundary tested). It replaced the
+Stage 1.1 mock "Rota (preview)", its fake "current week is published" logic,
+and its dead Publish button; those components and their CSS are gone.
+
+**One shared context.** The page owns exactly one resort and one week — a
+single `ResortSelector` and a single `WeekNav` — and passes `resortId` /
+`weekStart` to both `ManualRotaPanel` and `ManagerAvailabilityPanel`, so
+changing either always updates both. The Draft/Published chip is the REAL
+publication state of that resort + week, display only. The page's indicator and
+the panel share one query (`managerRotaKeys.week`); that query uses
+`staleTime: 0` (unlike the app's 30s default) so returning to a week re-reads
+availability a driver may have changed.
+
+**Shifts and coverage.** Real shift instances only, grouped by day (no
+fabricated empty days), several per day, nothing hard-coded to Lunch/Dinner and
+never parsing "(1P)/(2P)". Each card shows `N / required active assigned` plus a
+Covered/Uncovered pill (text and border, not colour alone). Above the
+requirement stays plain "Covered" (e.g. 3 / 2) — there is no "over-covered"
+state. **An inactive assignee is shown, labelled Inactive, and is removable, but
+does not count toward coverage** (required 2 with one active + one inactive
+reads 1 / 2, Uncovered).
+
+**Assigning.** "Assign a driver" lists only the resort's *active* drivers not
+already on the shift, Available first, each with an icon + text availability
+badge (Available / Not Submitted / Unavailable, with distinct border styles).
+Available and the shift still needs staff → assigns immediately. Otherwise ONE
+confirmation dialog covers every reason to pause: a Not Submitted warning
+(amber), an Unavailable warning (stronger), a "this shift already has its
+required coverage" notice, or any combination — never two sequential dialogs.
+The reason is optional (≤ 500 chars, stored only in the audit trail).
+
+**Race-safe.** Every normal assign attempt handles the server's typed
+`AvailabilityOverrideRequiredError`: if a driver the screen showed as Available
+has since become Unavailable / Not Submitted, the dialog opens for the state
+the SERVER reports (not the stale screen), and confirming retries with the
+acknowledgement. Remove calls `unassignDriver`; failures (historical shift,
+attendance recorded, already removed, ...) show a clean manager message and
+refresh stale data — never SQLSTATEs.
+
+**Dates and publication.** A shift dated before the operational today
+(Europe/Zurich, never the browser's date) is read-only and labelled Historical;
+today and the future are editable. A published week shows an informational note
+and stays fully editable — there is no Publish / Unpublish control, and a
+manager edit never unpublishes it.
+
+**Responsive.** Cards stack by day (no seven-column grid), so there is no
+horizontal overflow at 375px; dialogs fit the viewport; controls are
+touch-sized.
+
+**The dialog names the shift.** Every confirmation dialog opens with the exact
+shift it is about ("Dinner (2P) — Monday 26 Oct, 18:00–21:30"), because with
+several shifts per day a bare "Assign Gianni?" is ambiguous. (Added in MR-D after
+the real-Supabase walkthrough.) After a stale-data failure the dialog stays open
+with the server's message and the refreshed week behind it; Cancel closes it.
+
+**Keyboard and accessibility.** The shared `Modal` traps Tab / Shift+Tab inside
+the dialog (aria-modal), closes on Escape, and returns focus to the control that
+opened it (added in MR-D; tested in `components/ui/Modal.test.tsx`). Availability,
+coverage and Inactive are never colour-only: each has an icon or text plus a
+distinct border/underline. Assign / Remove buttons carry the driver and shift in
+their accessible name; the candidate list toggle exposes `aria-expanded`.
+
+**Known limitations (deliberate, not bugs):** nothing stops a driver being
+assigned to overlapping shifts on the same day (section J); Remove has no
+confirmation step; the availability read (shifts × drivers rows) is not
+paginated and the API caps a response at `max_rows = 1000`, so it needs paging
+before any one resort-week could approach that (section K); and the Dashboard and Driver My Rota are
+still Stage 1.1 mock data, so a manager's real assignments are not yet visible
+to drivers (Live Driver My Rota is the next checkpoint, ahead of any Publish UI).
+
+**Not part of this checkpoint:** Auto-Rota, Publish UI, Attendance UI, live
+Driver My Rota, live Dashboard.
+
+**Tests:** `components/rota/ManualRotaPanel.test.tsx`,
+`pages/manager/RotaAvailability.test.tsx`,
+`components/availability/ManagerAvailabilityPanel.test.tsx`,
+`components/rota/manualRotaBoundary.test.ts`, `components/ui/Modal.test.tsx`.
