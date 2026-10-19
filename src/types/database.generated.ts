@@ -1064,6 +1064,29 @@ export type Database = {
           },
         ]
       }
+      driver_visible_week_publications: {
+        Row: {
+          resort_id: string | null
+          week_start: string | null
+        }
+        Insert: {
+          resort_id?: string | null
+          week_start?: string | null
+        }
+        Update: {
+          resort_id?: string | null
+          week_start?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rota_publications_resort_id_fkey"
+            columns: ["resort_id"]
+            isOneToOne: false
+            referencedRelation: "resorts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_refreshable_instances: {
         Row: {
           current_end_time: string | null

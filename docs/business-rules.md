@@ -914,3 +914,39 @@ Driver My Rota, live Dashboard.
 `pages/manager/RotaAvailability.test.tsx`,
 `components/availability/ManagerAvailabilityPanel.test.tsx`,
 `components/rota/manualRotaBoundary.test.ts`, `components/ui/Modal.test.tsx`.
+
+---
+
+## M. Driver-safe publication status (Live Driver My Rota, LD-A)
+
+**Implemented in the database only** (migration `20261019100000_driver_safe_publication_status.sql`).
+Driver My Rota — the driver page is *not* built yet and is still Stage 1.1 mock
+data — will need to tell "this week is not published yet" apart from "this week
+is published and I have no shifts", which `driver_visible_assignments` alone
+cannot (both are zero rows).
+
+**Drivers read publication state from `driver_visible_week_publications`.** It
+returns one row per *currently published* week of the calling driver's *own*
+resort — exactly `resort_id` and `week_start`, nothing else. A row means
+published; no row means not published (draft, never published, or retracted).
+"Currently published" is the schema's one existing predicate
+(`published_at is not null and unpublished_at is null`) — no second publication
+model. It is an owner-executed (`security_invoker = false`) view like the other
+driver views and resolves the caller from the session
+(`current_app_user()`: auth user → app_users → driver); it has no driver or
+resort input, so nothing a client sends can widen it. `anon` cannot read it.
+
+**Direct driver access to `rota_publications` is no longer part of the supported
+privacy contract.** The driver SELECT policy was removed, so drivers get zero
+rows from the base table (it carried `published_by`, `generation_source` and the
+timestamps, which drivers have no need for). Managers are unchanged
+(`rota_publications_manager_all`). Driver Availability is unaffected: its lock
+comes from SECURITY DEFINER code (`week_availability_status`,
+`confirm_availability_week`, `reopen_availability_week`,
+`shift_instance_week_is_published`), none of which read the table as the driver.
+`driver_visible_assignments` is unchanged (own assignments, published weeks,
+active shifts); a manager's add/remove on a published week shows through it
+immediately, and un-publishing makes both views go empty.
+
+**Tests:** `supabase/tests/35_driver_safe_views.sql`.
+

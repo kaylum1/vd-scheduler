@@ -66,7 +66,7 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `10_availability_publication.sql` | Availability answers, Confirm/Reopen Week, stale-confirmation invalidation, publication locking, `week_availability_status` authority, direct-table identity/uniqueness/manager-visibility invariants (Stage 3) |
 | `20_assignments_attendance_adjustments.sql` | Rota assignments, attendance, payroll adjustments (types, positivity, voiding) |
 | `30_security_rls_audit.sql` | Anonymous/driver/manager RLS boundaries, RPC caller authorization, audit logging |
-| `35_driver_safe_views.sql` | `driver_visible_shifts` / `driver_visible_assignments` — the driver-facing security boundary views |
+| `35_driver_safe_views.sql` | `driver_visible_shifts` / `driver_visible_assignments` / `driver_visible_week_publications` — the driver-facing security boundary views. The publication view (Live Driver My Rota LD-A): own-resort-only visibility, draft / retracted weeks absent, exactly `resort_id` + `week_start`, anon rejected, drivers have no direct `rota_publications` read, manager access intact, "published but no own assignment", unpublished → published → manager add/remove → unpublish flow, and Driver Availability's publication lock still working |
 | `40_materialisation_template_safety.sql` | Insert-only + idempotent materialisation, effective template selection, override/adhoc/published/attendance refresh protection, cancellation preview/apply, operational timezone + DST |
 | `50_language_onfleet.sql` | `preferred_language`, Onfleet mapping uniqueness/atomicity |
 | `60_shift_staffing.sql` | `required_drivers` mandatory on `shift_templates`/`create_shift`/`revise_shift`/`reactivate_shift`, two separately-named Shifts with different staffing and no overlap conflict, direct materialisation (no rota-rule join), history preservation across a staffing revision, and proof the old `rota_rules_*` tables/counts are gone entirely (Stage 2D staffing simplification, replacing the abandoned Checkpoint 3 Rota Rules design) |
@@ -77,7 +77,7 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
 | `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
-As of Manual Rota checkpoint MR-D this suite has **407 assertions** across 14 files (unchanged since MR-A, which added `85_manual_rota_assignments.sql`; MR-B–MR-D added no migrations). That number will keep changing as the suite grows — don't
+As of Live Driver My Rota checkpoint LD-A this suite has **432 assertions** across 14 files (407 at the end of Manual Rota; LD-A added 25 to `35_driver_safe_views.sql` and one migration). That number will keep changing as the suite grows — don't
 chase a specific count; the point is that it stays genuinely comprehensive
 and, unlike its scratchpad predecessor, that it survives.
 
