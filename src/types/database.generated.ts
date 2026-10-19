@@ -1147,7 +1147,30 @@ export type Database = {
         }
         Returns: undefined
       }
+      _auto_rota_open_slots: {
+        Args: { p_resort_id: string; p_today: string; p_week_start: string }
+        Returns: {
+          open_slots: number
+          shift_date: string
+          shift_instance_id: string
+          shift_name: string
+          sort_order: number
+          start_time: string
+        }[]
+      }
       app_weekday: { Args: { d: string }; Returns: number }
+      apply_auto_rota: {
+        Args: { p_plan: Json; p_resort_id: string; p_week_start: string }
+        Returns: {
+          assigned_count: number
+          remaining_open_slots: number
+          resort_id: string
+          run_id: string
+          skipped_past_shift_count: number
+          uncovered_shift_ids: string[]
+          week_start: string
+        }[]
+      }
       apply_template_cancellation: {
         Args: {
           p_reason?: string
@@ -1365,6 +1388,17 @@ export type Database = {
         }
         Returns: {
           shift_type_id: string
+        }[]
+      }
+      rota_week_lock: {
+        Args: { p_resort_id: string; p_week_start: string }
+        Returns: undefined
+      }
+      rota_week_lock_keys: {
+        Args: { p_resort_id: string; p_week_start: string }
+        Returns: {
+          key1: number
+          key2: number
         }[]
       }
       set_driver_delivery_rate: {

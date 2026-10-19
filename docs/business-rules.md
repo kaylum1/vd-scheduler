@@ -1007,3 +1007,76 @@ verification only), Auto-Rota, Attendance, the live Dashboard, payroll.
 (`getDriverWeekRota`), `pages/driver/MyRota.test.tsx`, and the import-boundary
 test in `components/rota/manualRotaBoundary.test.ts`.
 
+---
+
+## O. Auto-Rota — database execution layer (AR-A)
+
+**Implemented in the database only** (migration `20261019110000_auto_rota_apply.sql`).
+The Auto-Rota planner (the fairness algorithm that chooses WHO is proposed), the
+repository method and the Generate Rota UI are **not built yet** — nothing in the
+app can call this yet.
+
+**Architecture.** A pure deterministic TypeScript planner will *propose* an
+assignment plan; Postgres decides whether every proposed assignment is still safe
+and applies it atomically. The database does **not** reproduce the fairness
+algorithm, so a planner/SQL disagreement can only cause a rejection, never an
+unsafe write. The submitted plan is **untrusted input**.
+
+**`apply_auto_rota(p_resort_id, p_week_start, p_plan jsonb)`** — manager-only,
+SECURITY DEFINER, all-or-nothing, one resort + one Monday–Sunday week. The plan is
+`[{"shift_instance_id", "driver_id"}, …]` and nothing else: it may not carry an
+availability state, a source, coverage or resort ids (extra fields are rejected);
+the server sets `assignment_source = 'auto'` and `assigned_by` = the manager.
+Under the week lock it re-reads fresh state and validates EVERY pair: the shift is
+in this resort and week, active and dated today or later; the driver exists, is
+active and belongs to the same resort; the driver has an **explicit Available row
+for that exact shift** (Unavailable and Not Submitted are never eligible and there
+is no override); the driver is not already assigned; no duplicate pairs; and the
+rows for a shift fit its CURRENT open coverage = `required_drivers` minus
+**active** assignments (inactive assignees stay stored but never count; an active
+manual assignment — even one made over an Unavailable answer — or an existing
+auto assignment does count). Auto-Rota therefore never over-assigns. Only then
+does it insert every row, or none. A **published** week is rejected server-side
+(`55006 published_week`) — Auto-Rota never changes a published rota, unlike
+Manual Rota, which may edit one. A wholly past week is `historical_week`; a pair
+targeting a past shift is `historical_shift`; shifts before the resort's
+operational today are skipped (today is allowed).
+
+**Error contract.** `42501` not a manager; `P0002` resort not found; `22023`
+malformed request (not an array, bad/missing ids, extra fields, duplicates, more
+than 1000 rows, a pair that cannot belong to this resort/week); `55006` with
+DETAIL `published_week` / `historical_week` / `historical_shift`; **`VD002` with
+DETAIL `stale_plan`** when the plan was well-formed but current state no longer
+permits it (availability changed, driver inactive, shift cancelled, already
+assigned, would over-assign). Partial coverage, "no eligible driver" and an empty
+plan are **success**.
+
+**Result (server-computed).** `assigned_count`, `remaining_open_slots`,
+`uncovered_shift_ids` (today/future active shifts only), `skipped_past_shift_count`
+and a `run_id`.
+
+**Concurrency: one lock per resort + week.** `apply_auto_rota`, `assign_driver`,
+`unassign_driver` and every `rota_publications` insert/update/delete (a trigger,
+since there is no Publish RPC yet) take the same transaction-scoped advisory lock
+`pg_advisory_xact_lock(key1, key2)`: `key1` = the resort UUID's four 32-bit words
+XOR-ed, `key2` = `week_start` minus 2000-01-01 in days — deterministic, no text
+hashing, different resort/weeks never serialize. A publish therefore waits for an
+in-flight generation or is observed by the next one; a manual assign/unassign
+cannot race an apply. The apply also row-locks (`FOR SHARE`) the planned shifts,
+drivers and **availability rows**, so a driver's Available→Unavailable change
+waits for the generation transaction instead of slipping between validation and
+insert (verified with two real connections). `assign_driver` / `unassign_driver`
+were re-created only to take the lock; their behaviour is unchanged.
+
+**Audit.** Each inserted row's audit context is `{operation: 'auto_rota', run_id,
+resort_id, week_start, availability_state: 'available', availability_override:
+false, created_count, uncovered_after}` — never the plan — set immediately before
+and cleared immediately after the bulk insert. `run_id` groups a run (a future
+bulk-undo hook).
+
+**Not in V1 (future work):** overlap / daily-maximum / rest-period rules,
+cross-week fairness, bulk undo of a run.
+
+**Tests:** `supabase/tests/86_auto_rota.sql` (and `85_manual_rota_assignments.sql`
+as the regression proof for the re-created manual RPCs).
+

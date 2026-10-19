@@ -126,6 +126,11 @@ DB groups: 00_core_schema 19 · 10_availability_publication 30 · 20_assignments
 - **No PR exists for `feature/live-driver-rota`.** Do not open one without being asked. When it is merged, branch the next checkpoint from the updated `main`.
 - **iCloud warning (recurring, real):** the project is under `~/Desktop`; iCloud evicts `.git` objects and `node_modules` files. Symptoms: `git checkout` hanging for many minutes, vitest/tsc hanging, `ETIMEDOUT`, rollup "does not provide an export named VERSION" (a dataless file reads as empty). Check `find . -flags +dataless -type f | wc -l`; re-materialise with a parallel `cat`; for stubborn `node_modules` files run `npm ci` (local only). Never commit workarounds; the real fix (moving the repo out of iCloud-synced storage) is the user's call.
 
+## M2. Auto-Rota progress (in flight on `feature/auto-rota`)
+
+- **AR-A (database/security layer) is done:** migration `20261019110000_auto_rota_apply.sql` — `apply_auto_rota(resort, week, plan jsonb)` (manager-only, atomic, untrusted plan, stale → `VD002`), the per-resort/week advisory lock shared by apply / `assign_driver` / `unassign_driver` / `rota_publications` writes, `supabase/tests/86_auto_rota.sql`. DB baseline is now **524**. Details: `docs/business-rules.md` §O.
+- **Not built yet:** the TypeScript planner (AR-B), the repository `generateAutoRota` with one stale-plan retry (AR-B), the Generate Rota UI (AR-C), verification/handoff (AR-D). Approved planner decisions: per-week rotating hash tie-break (`weekStart + driverId`, `driverId` final), weekend group then weekday group, within a group fewest-eligible-drivers first then date/sort_order/start_time/name/id, skip past shifts (today allowed), fairness per resort/week only, no predicted-count preview.
+
 ## N. Exact next checkpoint — AUTO-ROTA
 
 **Decided:** Auto-Rota is part of the main V1 plan and is the next product feature; after it comes a **minimal Publish Rota**, then the remaining operational/payroll work (Attendance, live Dashboard, payroll calculation/finalisation, Onfleet ingestion). **None of Auto-Rota is built — do not describe it as implemented.**
