@@ -4,12 +4,13 @@ import type { RotaRepository } from '../types';
 import type {
   AssignDriverParams,
   AssignDriverResult,
-  DriverVisibleAssignment,
+  DriverWeekRota,
   ManagerWeekRota,
   UnassignDriverParams,
   UnassignDriverResult,
 } from '../domain';
 import { RepositoryError, unwrap } from '../errors';
+import { buildDriverWeekRota } from '../driverRotaModel';
 import { buildManagerWeekRota } from '../managerRotaModel';
 import {
   mapDriverVisibleAssignment,
@@ -24,17 +25,40 @@ import { mapRotaRpcError } from './rotaErrors';
 export class SupabaseRotaRepository implements RotaRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
 
-  async listDriverVisibleAssignments(_driverId: string): Promise<DriverVisibleAssignment[]> {
-    // driver_visible_assignments has no driver-identifying column at all —
-    // it is already scoped to the calling session's own driver_id via
-    // current_app_user() (Checkpoint 4). _driverId is accepted only for
-    // interface symmetry with the mock implementation, which has no real
-    // session to infer identity from.
-    const rows = await unwrap(
-      'rota.listDriverVisibleAssignments',
-      this.client.from('driver_visible_assignments').select('*').order('date', { ascending: true })
-    );
-    return rows.map(mapDriverVisibleAssignment);
+  /**
+   * The driver's own rota for one week, from exactly two driver-safe views read
+   * in parallel (never the base tables, which drivers cannot read):
+   *   - driver_visible_week_publications: a row means this week is currently
+   *     published for the caller's own resort;
+   *   - driver_visible_assignments: the caller's own assignments in published
+   *     weeks, active shifts only.
+   * Both views resolve the driver from the authenticated session and have no
+   * driver column, so identity is never sent: `driverId` is deliberately
+   * unused here (it exists on the contract only for the mock provider).
+   */
+  async getDriverWeekRota(params: { weekStart: string; driverId: string }): Promise<DriverWeekRota> {
+    const { weekStart } = params;
+    const [publicationRows, assignmentRows] = await Promise.all([
+      unwrap(
+        'rota.driverWeek.publication',
+        this.client.from('driver_visible_week_publications').select('resort_id, week_start').eq('week_start', weekStart)
+      ),
+      unwrap(
+        'rota.driverWeek.assignments',
+        this.client
+          .from('driver_visible_assignments')
+          .select('*')
+          .eq('week_start', weekStart)
+          .order('date', { ascending: true })
+          .order('start_time', { ascending: true })
+      ),
+    ]);
+
+    return buildDriverWeekRota({
+      weekStart,
+      isPublished: publicationRows.length > 0,
+      assignments: assignmentRows.map(mapDriverVisibleAssignment),
+    });
   }
 
   /**

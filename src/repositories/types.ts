@@ -34,7 +34,7 @@ import type {
   DriverShiftAvailability,
   AssignDriverParams,
   AssignDriverResult,
-  DriverVisibleAssignment,
+  DriverWeekRota,
   ManagerWeekRota,
   UnassignDriverParams,
   UnassignDriverResult,
@@ -256,8 +256,21 @@ export interface AvailabilityRepository {
 }
 
 export interface RotaRepository {
-  /** Driver-safe "My Rota": own published assignments only, no colleague identities. */
-  listDriverVisibleAssignments(driverId: string): Promise<DriverVisibleAssignment[]>;
+  /**
+   * Driver-safe "My Rota" for one operational week: the calling driver's OWN
+   * published assignments plus whether the week is published at all (so
+   * "not published yet" and "published, no shifts for me" are different
+   * states). Never contains colleagues, headcount, pay, availability or any
+   * manager data -- see DriverWeekRota.
+   *
+   * IDENTITY: the Supabase implementation takes the driver from the
+   * authenticated session (the safe views resolve it) and NEVER uses
+   * `driverId` -- it is not sent to the database, so changing it cannot show
+   * another driver's rota. It exists only because the mock provider has no
+   * session to infer the driver from.
+   * Query-key convention: driverRotaKeys.week(driverId, weekStart).
+   */
+  getDriverWeekRota(params: { weekStart: string; driverId: string }): Promise<DriverWeekRota>;
 
   // ---------------------------------------------------------------------
   // Manager-only (Manual Rota MR-B). Everything below carries manager-only

@@ -3,6 +3,7 @@ import type {
   AssignDriverParams,
   AssignDriverResult,
   DriverVisibleAssignment,
+  DriverWeekRota,
   ManagerWeekRota,
   RotaAvailabilityState,
   ShiftInstanceRecord,
@@ -10,6 +11,7 @@ import type {
   UnassignDriverResult,
 } from '../domain';
 import { AvailabilityOverrideRequiredError, RotaAssignmentError } from '../errors';
+import { buildDriverWeekRota } from '../driverRotaModel';
 import { buildManagerWeekRota } from '../managerRotaModel';
 import { parseISODate, startOfWeek, toISODate } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
@@ -80,12 +82,41 @@ function findMockShiftInstance(shiftInstanceId: string): ShiftInstanceRecord | n
 }
 
 export class MockRotaRepository implements RotaRepository {
-  async listDriverVisibleAssignments(_driverId: string): Promise<DriverVisibleAssignment[]> {
-    // No driver-facing published-rota concept exists in the mock fixtures
-    // (Stage 1.1's own mock data models "published" per-shift-instance, which
-    // this repository layer deliberately does not copy -- see mock/fixtures.ts).
-    // Returns an empty list until Driver My Rota is converted to live data.
-    return [];
+  /**
+   * Mock analogue of the driver-safe My Rota read. There is no session in mock
+   * mode, so the driver comes from `driverId` (already bridged to the
+   * repository id space by the caller). Publication state is the existing
+   * mockRotaPublications fixture -- empty by default, so a normal mock session
+   * shows every week as "not published yet"; tests publish explicitly.
+   */
+  async getDriverWeekRota(params: { weekStart: string; driverId: string }): Promise<DriverWeekRota> {
+    const { weekStart, driverId } = params;
+    const driver = mockDrivers.find((d) => d.id === driverId);
+    if (!driver) return buildDriverWeekRota({ weekStart, isPublished: false, assignments: [] });
+
+    const shiftsById = new Map(
+      generateMockShiftInstancesForWeek(driver.resortId, weekStart)
+        .filter((s) => s.status === 'active')
+        .map((s) => [s.id, s])
+    );
+    const assignments: DriverVisibleAssignment[] = [];
+    for (const a of mockRotaAssignments) {
+      const shift = shiftsById.get(a.shiftInstanceId);
+      if (a.driverId !== driverId || !shift) continue;
+      assignments.push({
+        assignmentId: a.id,
+        shiftInstanceId: shift.id,
+        resortId: shift.resortId,
+        date: shift.date,
+        weekStart: shift.weekStart,
+        shiftKey: shift.shiftKey,
+        name: shift.name,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+      });
+    }
+
+    return buildDriverWeekRota({ weekStart, isPublished: isMockWeekPublished(driver.resortId, weekStart), assignments });
   }
 
   async getManagerWeekRota(params: { resortId: string; weekStart: string }): Promise<ManagerWeekRota> {
