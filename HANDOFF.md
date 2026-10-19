@@ -128,8 +128,9 @@ DB groups: 00_core_schema 19 · 10_availability_publication 30 · 20_assignments
 
 ## M2. Auto-Rota progress (in flight on `feature/auto-rota`)
 
-- **AR-A (database/security layer) is done:** migration `20261019110000_auto_rota_apply.sql` — `apply_auto_rota(resort, week, plan jsonb)` (manager-only, atomic, untrusted plan, stale → `VD002`), the per-resort/week advisory lock shared by apply / `assign_driver` / `unassign_driver` / `rota_publications` writes, `supabase/tests/86_auto_rota.sql`. DB baseline is now **524**. Details: `docs/business-rules.md` §O.
-- **Not built yet:** the TypeScript planner (AR-B), the repository `generateAutoRota` with one stale-plan retry (AR-B), the Generate Rota UI (AR-C), verification/handoff (AR-D). Approved planner decisions: per-week rotating hash tie-break (`weekStart + driverId`, `driverId` final), weekend group then weekday group, within a group fewest-eligible-drivers first then date/sort_order/start_time/name/id, skip past shifts (today allowed), fairness per resort/week only, no predicted-count preview.
+- **AR-A (database/security layer) — done:** migration `20261019110000_auto_rota_apply.sql`: `apply_auto_rota(resort, week, plan jsonb)` (manager-only, atomic, untrusted plan, stale → `VD002`), the per-resort/week advisory lock shared by apply / `assign_driver` / `unassign_driver` / `rota_publications` writes, `supabase/tests/86_auto_rota.sql`. DB baseline **524**. `docs/business-rules.md` §O.
+- **AR-B (planner + repository) — done:** pure planner `lib/autoRotaPlanner.ts` (weekend-then-weekday buckets; fewest bucket count → fewest total → weekly FNV-1a tie-break `${weekStart}:${driverId}` → `driverId`; scarcity-first shift order then date/sortOrder/startTime/name/id; skips past shifts, today eligible; no overlap/daily rules), `lib/autoRotaHash.ts` (fixed vectors), `RotaRepository.generateAutoRota` (read → plan → one `apply_auto_rota` → the DB's result; one re-read/re-plan on `stale_plan` or `historical_shift`; typed `AutoRotaError`), both providers. `ManagerRotaShift` gained `sortOrder`. `docs/business-rules.md` §P.
+- **Not built yet:** the Generate Rota UI (AR-C — button in the Manual Rota card header, confirmation dialog, authoritative success summary, disabled when published/past; no predicted-count preview), verification/handoff (AR-D).
 
 ## N. Exact next checkpoint — AUTO-ROTA
 

@@ -18,9 +18,11 @@
  */
 
 import {
+  AutoRotaError,
   AvailabilityOverrideRequiredError,
   RepositoryError,
   RotaAssignmentError,
+  type AutoRotaErrorKind,
   type PostgrestLikeError,
 } from '../errors';
 
@@ -51,4 +53,40 @@ export function mapRotaRpcError(operation: RotaRpcOperation, error: PostgrestLik
   // 42501 (not a manager), anything unrecognised, VD001/55006 with an
   // unexpected DETAIL: the generic error -- its userMessage never leaks DB text.
   return new RepositoryError(`${operation} failed: ${error.message}`, options);
+}
+
+/**
+ * apply_auto_rota's contract (AR-A migration 20261019110000):
+ *   VD002  DETAIL stale_plan        the plan no longer fits current state
+ *   55006  DETAIL published_week | historical_week | historical_shift
+ *   42501  not a manager            P0002  resort not found
+ *   22023  malformed request: DETAIL plan_malformed / plan_shift_not_in_week /
+ *          plan_driver_not_in_resort -> invalid_plan; no DETAIL (null argument,
+ *          not a Monday) -> invalid_week
+ * Anything unrecognised -- including a known SQLSTATE with an unexpected DETAIL --
+ * becomes kind 'unknown' rather than being mistaken for a known state.
+ */
+export function mapAutoRotaRpcError(operation: string, error: PostgrestLikeError): AutoRotaError {
+  const options = { operation, code: error.code, cause: error };
+  const detail = error.details ?? null;
+  let kind: AutoRotaErrorKind = 'unknown';
+
+  switch (error.code) {
+    case 'VD002':
+      if (detail === 'stale_plan') kind = 'stale_plan';
+      break;
+    case '55006':
+      if (detail === 'published_week' || detail === 'historical_week' || detail === 'historical_shift') kind = detail;
+      break;
+    case '42501':
+      kind = 'permission_denied';
+      break;
+    case 'P0002':
+      kind = 'resort_not_found';
+      break;
+    case '22023':
+      kind = detail === null ? 'invalid_week' : 'invalid_plan';
+      break;
+  }
+  return new AutoRotaError(kind, options);
 }

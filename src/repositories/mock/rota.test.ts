@@ -9,7 +9,7 @@ import {
   mockShiftTypes,
   resetMockFixturesForTesting,
 } from './fixtures';
-import { isAvailabilityOverrideRequired, isRotaAssignmentError } from '../errors';
+import { AutoRotaError, isAutoRotaError, isAvailabilityOverrideRequired, isRotaAssignmentError } from '../errors';
 import { getShiftCoverage } from '../../lib/rotaCoverage';
 import type { AvailabilityStatus } from '../domain';
 
@@ -399,5 +399,151 @@ describe('MockRotaRepository.getDriverWeekRota', () => {
     seedAssignment(FUTURE_DINNER, 'mock-gianni');
     const json = JSON.stringify(await myRota());
     expect(json).not.toMatch(/requiredDrivers|source|assignedAt|manual|mock-maria|availability/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-Rota: generateAutoRota (the SAME planner and retry orchestration as the
+// Supabase provider, applied to the mock assignment state)
+// ---------------------------------------------------------------------------
+
+describe('MockRotaRepository.generateAutoRota', () => {
+  // Monday dinner already exists (required 2). Add a Friday and a Saturday shift (required 1 each).
+  function addWeekendShifts() {
+    for (const [key, name, weekday] of [['fri', 'Friday Dinner', 4], ['sat', 'Saturday Dinner', 5]] as const) {
+      mockShiftTypes.push({ id: `mock-crans-${key}`, resortId: CRANS, key, name, sortOrder: weekday, isActive: true });
+      mockShiftTemplates.push({
+        id: `mock-crans-${key}-tpl`, resortId: CRANS, shiftTypeId: `mock-crans-${key}`, weekday,
+        startTime: '18:00', endTime: '21:30', requiredDrivers: 1, basePayChf: null, deliveryRateChf: null, isPremium: null,
+        effectiveFrom: '2024-01-01', effectiveTo: null, isActive: true, updatedAt: '2024-01-01T00:00:00.000Z',
+      });
+    }
+  }
+  const FRI = `mock-crans-fri-tpl-2030-01-11`;
+  const SAT = `mock-crans-sat-tpl-2030-01-12`;
+  const generate = (weekStart = FUTURE_WEEK, resortId = CRANS) => repo.generateAutoRota({ resortId, weekStart });
+  const assignmentsOf = (shiftId: string) => mockRotaAssignments.filter((a) => a.shiftInstanceId === shiftId);
+
+  it('plans with the shared planner: only explicitly Available drivers, fairly, additively, as source = auto', async () => {
+    addWeekendShifts();
+    answer(FUTURE_DINNER, 'mock-gianni', 'available'); // Monday needs 2: Gianni Available, Maria Unavailable
+    answer(FUTURE_DINNER, 'mock-maria', 'unavailable');
+    answer(FRI, 'mock-gianni', 'available');
+    answer(FRI, 'mock-maria', 'available');
+    answer(SAT, 'mock-gianni', 'available'); // Saturday: only Gianni -> scarcity-first gives Saturday to Gianni, Friday to Maria
+
+    const result = await generate();
+
+    expect(assignmentsOf(SAT).map((a) => a.driverId)).toEqual(['mock-gianni']);
+    expect(assignmentsOf(FRI).map((a) => a.driverId)).toEqual(['mock-maria']);
+    expect(assignmentsOf(FUTURE_DINNER).map((a) => a.driverId)).toEqual(['mock-gianni']); // Maria is Unavailable: never assigned
+    expect(mockRotaAssignments.every((a) => a.source === 'auto')).toBe(true);
+    expect(result.assignedCount).toBe(3);
+  });
+
+  it('returns the post-apply result: partial coverage is a normal success with the open slot and the uncovered shift', async () => {
+    answer(FUTURE_DINNER, 'mock-gianni', 'available'); // Monday requires 2; only one Available driver
+    const result = await generate();
+    expect(result).toMatchObject({ resortId: CRANS, weekStart: FUTURE_WEEK, assignedCount: 1, remainingOpenSlots: 1, uncoveredShiftIds: [FUTURE_DINNER], skippedPastShiftCount: 0 });
+    expect(result.runId).toMatch(/^mock-auto-rota-run-/);
+  });
+
+  it('zero eligible drivers is a success: nothing created, every slot still open', async () => {
+    const result = await generate();
+    expect(mockRotaAssignments).toHaveLength(0);
+    expect(result).toMatchObject({ assignedCount: 0, remainingOpenSlots: 2, uncoveredShiftIds: [FUTURE_DINNER] });
+  });
+
+  it('is additive: existing MANUAL assignments are preserved untouched and count as coverage', async () => {
+    seedAssignment(FUTURE_DINNER, 'mock-gianni'); // manual (an override: Gianni never answered)
+    answer(FUTURE_DINNER, 'mock-maria', 'available');
+    const before = JSON.stringify(mockRotaAssignments);
+    const result = await generate();
+
+    expect(result.assignedCount).toBe(1); // only the second slot
+    expect(JSON.stringify(mockRotaAssignments.slice(0, 1))).toBe(before.slice(0, before.length)); // the manual row is byte-identical
+    expect(mockRotaAssignments[0].source).toBe('manual');
+    expect(mockRotaAssignments[1]).toMatchObject({ driverId: 'mock-maria', source: 'auto' });
+  });
+
+  it('never over-assigns an already covered shift', async () => {
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    seedAssignment(FUTURE_DINNER, 'mock-maria');
+    answer(FUTURE_DINNER, 'mock-gianni', 'available');
+    const result = await generate();
+    expect(result.assignedCount).toBe(0);
+    expect(mockRotaAssignments).toHaveLength(2);
+  });
+
+  it('refuses a PUBLISHED week with the typed error and changes nothing', async () => {
+    answer(FUTURE_DINNER, 'mock-gianni', 'available');
+    mockRotaPublications.push({ resortId: CRANS, weekStart: FUTURE_WEEK, publishedAt: '2030-01-01T00:00:00Z', unpublishedAt: null });
+    const error = await generate().catch((e) => e);
+    expect(isAutoRotaError(error, 'published_week')).toBe(true);
+    expect(mockRotaAssignments).toHaveLength(0);
+  });
+
+  it('refuses a wholly historical week', async () => {
+    answer(PAST_DINNER, 'mock-gianni', 'available');
+    const error = await generate(PAST_WEEK).catch((e) => e);
+    expect(isAutoRotaError(error, 'historical_week')).toBe(true);
+    expect(mockRotaAssignments).toHaveLength(0);
+  });
+
+  it('rejects an unknown resort and a week that does not start on a Monday', async () => {
+    expect(isAutoRotaError(await generate(FUTURE_WEEK, 'mock-nowhere').catch((e) => e), 'resort_not_found')).toBe(true);
+    expect(isAutoRotaError(await generate('2030-01-08').catch((e) => e), 'invalid_week')).toBe(true);
+  });
+
+  it('re-run idempotency: generating again with nothing changed creates nothing', async () => {
+    answer(FUTURE_DINNER, 'mock-gianni', 'available');
+    answer(FUTURE_DINNER, 'mock-maria', 'available');
+    const first = await generate();
+    expect(first.assignedCount).toBe(2);
+    const second = await generate();
+    expect(second).toMatchObject({ assignedCount: 0, remainingOpenSlots: 0, uncoveredShiftIds: [] });
+    expect(mockRotaAssignments).toHaveLength(2);
+  });
+
+  it('remove then re-run: an assignment removed through the normal Manual Rota path is filled again', async () => {
+    answer(FUTURE_DINNER, 'mock-gianni', 'available');
+    answer(FUTURE_DINNER, 'mock-maria', 'available');
+    await generate();
+    await repo.unassignDriver({ shiftInstanceId: FUTURE_DINNER, driverId: 'mock-maria' });
+    expect(mockRotaAssignments).toHaveLength(1);
+
+    const again = await generate();
+    expect(again.assignedCount).toBe(1);
+    expect(assignmentsOf(FUTURE_DINNER).map((a) => a.driverId).sort()).toEqual(['mock-gianni', 'mock-maria']);
+  });
+
+  it('the manager read model sees the generated rows as AUTO assignments', async () => {
+    answer(FUTURE_DINNER, 'mock-gianni', 'available');
+    await generate();
+    const rota = await read();
+    expect(rota.shifts[0].assignments.map((a) => [a.driverName, a.source])).toEqual([['Gianni', 'auto']]);
+  });
+
+  it('is deterministic: two identical fresh worlds produce identical plans and results (apart from the run id)', async () => {
+    const run = async () => {
+      resetMockFixturesForTesting();
+      repo = new MockRotaRepository();
+      addDriver('mock-maria', 'Maria');
+      addWeekendShifts();
+      answer(FUTURE_DINNER, 'mock-gianni', 'available');
+      answer(FUTURE_DINNER, 'mock-maria', 'available');
+      answer(FRI, 'mock-gianni', 'available');
+      answer(FRI, 'mock-maria', 'available');
+      const { runId: _ignored, ...result } = await generate();
+      return { result, rows: mockRotaAssignments.map((a) => `${a.shiftInstanceId}:${a.driverId}:${a.source}`) };
+    };
+    expect(await run()).toEqual(await run());
+  });
+
+  it('throws the same AutoRotaError class (and manager-facing copy) the Supabase provider does', async () => {
+    mockRotaPublications.push({ resortId: CRANS, weekStart: FUTURE_WEEK, publishedAt: '2030-01-01T00:00:00Z', unpublishedAt: null });
+    const error = await generate().catch((e) => e);
+    expect(error).toBeInstanceOf(AutoRotaError);
+    expect((error as AutoRotaError).userMessage).toMatch(/published/i);
   });
 });

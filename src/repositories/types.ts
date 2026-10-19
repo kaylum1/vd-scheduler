@@ -35,6 +35,8 @@ import type {
   AssignDriverParams,
   AssignDriverResult,
   DriverWeekRota,
+  AutoRotaResult,
+  GenerateAutoRotaParams,
   ManagerWeekRota,
   UnassignDriverParams,
   UnassignDriverResult,
@@ -310,6 +312,20 @@ export interface RotaRepository {
    * published current/future weeks are allowed.
    */
   assignDriver(params: AssignDriverParams): Promise<AssignDriverResult>;
+
+  /**
+   * Auto-Rota for ONE resort + Monday-Sunday week (manager only). Additive:
+   * fills open positions with fair, explicitly-Available drivers, never removes
+   * or changes an assignment, and never touches a published week.
+   *
+   * Orchestrated here, not in React: read the week, plan with the pure planner
+   * (lib/autoRotaPlanner.ts), apply the plan through the one atomic database
+   * call, and return the DATABASE's authoritative result. A stale plan (or a
+   * midnight crossing) is re-read and re-planned exactly once; real failures are
+   * typed AutoRotaErrors. Partial coverage, "no eligible driver" and "nothing to
+   * create" are successes (check remainingOpenSlots), never errors.
+   */
+  generateAutoRota(params: GenerateAutoRotaParams): Promise<AutoRotaResult>;
 
   /**
    * Atomic (unassign_driver). Removes exactly one assignment. Rejected: not

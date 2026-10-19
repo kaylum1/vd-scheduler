@@ -4,12 +4,18 @@ import type { RotaRepository } from '../types';
 import type {
   AssignDriverParams,
   AssignDriverResult,
+  AutoRotaPlan,
+  AutoRotaResult,
+  GenerateAutoRotaParams,
   DriverWeekRota,
   ManagerWeekRota,
   UnassignDriverParams,
   UnassignDriverResult,
 } from '../domain';
 import { RepositoryError, unwrap } from '../errors';
+import { runAutoRota } from '../autoRotaOrchestration';
+import { getOperationalToday } from '../../lib/operationalTime';
+import { toISODate } from '../../mock-data/date-utils';
 import { buildDriverWeekRota } from '../driverRotaModel';
 import { buildManagerWeekRota } from '../managerRotaModel';
 import {
@@ -20,7 +26,7 @@ import {
   mapShiftInstance,
   parseRotaAvailabilityState,
 } from './mappers';
-import { mapRotaRpcError } from './rotaErrors';
+import { mapAutoRotaRpcError, mapRotaRpcError } from './rotaErrors';
 
 export class SupabaseRotaRepository implements RotaRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
@@ -167,5 +173,42 @@ export class SupabaseRotaRepository implements RotaRepository {
       throw new RepositoryError('rota.unassignDriver returned an unexpected result', { operation: 'rota.unassignDriver', cause: data });
     }
     return { assignmentId: row.assignment_id };
+  }
+
+  /**
+   * See RotaRepository.generateAutoRota. Orchestration only: the fairness
+   * algorithm is the pure planner's, every safety rule is the database's. One
+   * apply_auto_rota call per attempt (two at most), never a direct write to
+   * rota_assignments and never a loop over assign_driver.
+   */
+  async generateAutoRota(params: GenerateAutoRotaParams): Promise<AutoRotaResult> {
+    return runAutoRota({
+      readWeek: () => this.getManagerWeekRota(params),
+      applyPlan: (plan) => this.applyAutoRotaPlan(plan),
+      operationalToday: () => toISODate(getOperationalToday()),
+    });
+  }
+
+  private async applyAutoRotaPlan(plan: AutoRotaPlan): Promise<AutoRotaResult> {
+    const { data, error } = await this.client.rpc('apply_auto_rota', {
+      p_resort_id: plan.resortId,
+      p_week_start: plan.weekStart,
+      // ONLY the pair. Planning metadata, counts and coverage never reach the database.
+      p_plan: plan.assignments.map((a) => ({ shift_instance_id: a.shiftInstanceId, driver_id: a.driverId })),
+    });
+    if (error) throw mapAutoRotaRpcError('rota.generateAutoRota', error);
+
+    const row = data?.[0];
+    if (!row) throw new RepositoryError('rota.generateAutoRota returned an unexpected result', { operation: 'rota.generateAutoRota', cause: data });
+    // The result is the DATABASE's, computed after the insert -- never the planner's numbers.
+    return {
+      resortId: row.resort_id,
+      weekStart: row.week_start,
+      assignedCount: row.assigned_count,
+      remainingOpenSlots: row.remaining_open_slots,
+      uncoveredShiftIds: row.uncovered_shift_ids,
+      skippedPastShiftCount: row.skipped_past_shift_count,
+      runId: row.run_id,
+    };
   }
 }

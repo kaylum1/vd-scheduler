@@ -140,3 +140,55 @@ export class RotaAssignmentError extends RepositoryError {
 export function isRotaAssignmentError(error: unknown, kind?: RotaAssignmentErrorKind): error is RotaAssignmentError {
   return error instanceof RotaAssignmentError && (kind === undefined || error.kind === kind);
 }
+
+// ---------------------------------------------------------------------
+// Auto-Rota (AR-B): typed generation errors.
+//
+// apply_auto_rota (AR-A) reports real failures through SQLSTATE/DETAIL; the
+// Supabase adapter translates them (repositories/supabase/rotaErrors.ts) into
+// the provider-agnostic error below, and the mock throws the same class.
+// Partial coverage, "no eligible driver" and "nothing to create" are NOT
+// errors -- they are a normal AutoRotaResult.
+// ---------------------------------------------------------------------
+
+export type AutoRotaErrorKind =
+  | 'published_week'
+  | 'historical_week'
+  | 'historical_shift'
+  | 'stale_plan'
+  | 'permission_denied'
+  | 'resort_not_found'
+  | 'invalid_week'
+  | 'invalid_plan'
+  | 'unknown';
+
+const AUTO_ROTA_MESSAGES: Record<AutoRotaErrorKind, string> = {
+  published_week: 'This rota is published, so Auto-Rota can’t change it. Edit published assignments manually.',
+  historical_week: 'This week is in the past, so Auto-Rota can’t generate it.',
+  historical_shift: 'A shift in this week has just started or passed. Nothing was added — please try again.',
+  stale_plan: 'The rota changed while it was being generated. Nothing was added — please try again.',
+  permission_denied: 'You do not have permission to generate a rota.',
+  resort_not_found: 'That resort could not be found.',
+  invalid_week: 'Auto-Rota needs a valid resort and a Monday-to-Sunday week.',
+  invalid_plan: 'Something went wrong preparing the rota. Nothing was added — please try again.',
+  unknown: 'Something went wrong. Please try again.',
+};
+
+export class AutoRotaError extends RepositoryError {
+  readonly kind: AutoRotaErrorKind;
+
+  constructor(kind: AutoRotaErrorKind, options: { operation: string; code?: string; cause?: unknown }) {
+    super(`${options.operation} failed: ${kind}`, options);
+    this.name = 'AutoRotaError';
+    this.kind = kind;
+  }
+
+  /** First-party, manager-facing copy. Never DB text, SQLSTATEs or constraint names. */
+  override get userMessage(): string {
+    return AUTO_ROTA_MESSAGES[this.kind];
+  }
+}
+
+export function isAutoRotaError(error: unknown, kind?: AutoRotaErrorKind): error is AutoRotaError {
+  return error instanceof AutoRotaError && (kind === undefined || error.kind === kind);
+}

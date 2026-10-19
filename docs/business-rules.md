@@ -519,7 +519,7 @@ staffing was added to the refresh comparison. A driver who said "Available"
 for a shift is still answering the same time window regardless of how many
 colleagues are also asked to work it.
 
-**F. Future Auto-Rota (design direction only — not implemented).** Will be
+**F. Auto-Rota (design; the database layer is section O and the planner + repository section P — the Generate Rota UI is not built yet).** Is
 built entirely from `shift_instances`/`required_drivers`/dates/driver
 resort/`availability`/`rota_assignments` — no Rota Rules, no High-value.
 Both `availability` (`available`/`unavailable`/absence=Not Submitted) and
@@ -528,25 +528,15 @@ Both `availability` (`available`/`unavailable`/absence=Not Submitted) and
 confirmed sufficient by inspection; no redesign is planned.
 
 Allocation runs **per resort, per Monday–Sunday week**, in two independent
-phases:
-1. **Weekend first** (Fri/Sat/Sun) — balance weekend assignment counts as
-   evenly as availability permits.
-2. **Weekday second** (Mon–Thu) — balance weekday assignment counts
-   separately; weekend and weekday fairness are never blended.
-
-Within each phase: **coverage always wins over fairness** (an open position
-is filled if anyone eligible is available, even if that makes the count
-less even); **availability is a hard constraint** (only an explicit
-"Available" answer counts — Not Submitted/Unavailable never assigned, never
-guessed); **driver-resort is a hard constraint**; ties broken
-**deterministically** (fewest assignments in the current phase, then fewest
-total assignments this week, then `drivers.created_at`, then `drivers.id` —
-never randomness, never display name). A multi-driver Shift (e.g. "Dinner
-(2P)") needs that many **distinct** drivers, each counted independently.
-**Existing manual assignments are preserved and counted** toward a driver's
-fairness total before allocation begins — Auto-Rota only fills the
-remaining open positions on a shift, never replaces or rebalances around a
-manual assignment.
+buckets — **weekend** (Fri/Sat/Sun) first, then **weekday** (Mon–Thu) — and
+fairness is never blended across them. The approved algorithm, tie-break and shift
+order (superseding the earlier `created_at` tie-break idea) are specified and
+implemented in **section P**; the database half is section O. Availability is a
+hard constraint (only an explicit "Available" counts; Not Submitted and
+Unavailable are never assigned), driver-resort is a hard constraint, coverage
+beats fairness, a multi-driver Shift needs that many **distinct** drivers, and
+existing assignments are preserved and counted. No overlap, daily-maximum or
+rest-period rules exist in V1.
 
 ---
 
@@ -1011,10 +1001,9 @@ test in `components/rota/manualRotaBoundary.test.ts`.
 
 ## O. Auto-Rota — database execution layer (AR-A)
 
-**Implemented in the database only** (migration `20261019110000_auto_rota_apply.sql`).
-The Auto-Rota planner (the fairness algorithm that chooses WHO is proposed), the
-repository method and the Generate Rota UI are **not built yet** — nothing in the
-app can call this yet.
+**Implemented in the database** (migration `20261019110000_auto_rota_apply.sql`).
+The planner and repository that call it are section P; the Generate Rota UI is
+**not built yet**.
 
 **Architecture.** A pure deterministic TypeScript planner will *propose* an
 assignment plan; Postgres decides whether every proposed assignment is still safe
@@ -1079,4 +1068,81 @@ cross-week fairness, bulk undo of a run.
 
 **Tests:** `supabase/tests/86_auto_rota.sql` (and `85_manual_rota_assignments.sql`
 as the regression proof for the re-created manual RPCs).
+
+---
+
+## P. Auto-Rota — planner and repository (AR-B)
+
+**Implemented:** the pure planner (`lib/autoRotaPlanner.ts`), its tie-break hash
+(`lib/autoRotaHash.ts`) and `RotaRepository.generateAutoRota` for both providers.
+There is **no Generate Rota UI yet** — nothing in the manager screens calls it.
+
+**The planner proposes; the database decides.** `buildAutoRotaPlan({ week:
+ManagerWeekRota, operationalToday })` is pure (no I/O, no clock, no randomness) and
+is the ONLY implementation of the fairness algorithm. `apply_auto_rota` (section O)
+independently re-validates every proposed pair under a lock, so a planner/SQL
+disagreement can only cause a rejection, never an unsafe write.
+
+**Algorithm.** One resort + one Monday–Sunday week.
+- *Eligible* for a NEW proposal: an active candidate whose availability for that
+  exact shift is `available`, not already assigned to that shift. Unavailable and
+  Not Submitted are never eligible; there is no override and nothing is inferred
+  between shifts.
+- *Existing assignments* are preserved and never removed. Active ones (manual or
+  auto — even a manual override of an Unavailable answer) count toward coverage and
+  the driver's fairness counters; inactive ones count toward neither and never make
+  anyone eligible. Past shifts still seed the counters. `openSlots = max(required −
+  active assignments, 0)`; Auto-Rota never over-assigns and never proposes the same
+  driver twice for one shift.
+- *Buckets and fairness.* Weekend (Fri/Sat/Sun) is planned first, then weekday
+  (Mon–Thu). For a slot the winner is the eligible driver with the **fewest
+  assignments in that bucket**, then the **fewest in total**, then the weekly
+  tie-break, then `driverId` (lexical). Counters update after every pick. The total
+  count only breaks ties — a heavy weekend load does not primarily compensate on a
+  weekday. Fairness only chooses among the eligible: if one driver is the only
+  option they get the slot (coverage beats fairness). Drivers have no per-driver
+  capacity, so greedy always reaches the maximum possible coverage.
+- *Shift order.* Within a bucket the most constrained shift goes first (fewest
+  eligible drivers), then the canonical order date, `sortOrder`, `startTime`, name,
+  id. This matters: Friday {A,B} and Saturday {A only}, each needing one — plain
+  chronological order can give Friday to A and leave 2 / 0; scarcity-first gives
+  Saturday to A and Friday to B, 1 / 1 (tested). It is a heuristic, not a global
+  optimum.
+- *History.* Shifts before the operational today are skipped (today is eligible);
+  their assignments still count; past gaps are never reported. A wholly past week
+  plans nothing (`weekIsHistorical`) and the database's `historical_week` is the
+  authoritative verdict.
+- *No* overlap, daily-maximum, rest-period or weekly-maximum rule; fairness is per
+  resort/week only (no cross-week fairness).
+
+**Weekly tie-break.** FNV-1a 32-bit over the UTF-8 bytes of
+`${weekStart}:${driverId}`, compared as an unsigned integer ascending (integer math
+via `Math.imul`), then `driverId`. Deterministic and stable across engines; it
+ROTATES by week so equal-count ties do not always favour the same driver. Fixed
+test vectors pin it — changing it changes every future plan.
+
+**Repository flow (`generateAutoRota({ resortId, weekStart })`).** Read the week
+(`getManagerWeekRota`) → plan → one `apply_auto_rota` call with ONLY
+`{shift_instance_id, driver_id}` pairs → return the **database's** result
+(`assignedCount`, `remainingOpenSlots`, `uncoveredShiftIds`,
+`skippedPastShiftCount`, `runId`), never the planner's numbers. A `stale_plan`, or a
+`historical_shift` (the operational day crossed midnight), discards the plan and
+re-reads and re-plans **exactly once** (`autoRotaOrchestration.ts`, shared by both
+providers); a second one surfaces as the typed error. `published_week`,
+`historical_week`, permission, malformed and unknown errors are never retried.
+Errors are a typed `AutoRotaError` (`published_week`, `historical_week`,
+`historical_shift`, `stale_plan`, `permission_denied`, `resort_not_found`,
+`invalid_week`, `invalid_plan`, `unknown`) with first-party `userMessage`s; partial
+coverage, "no eligible driver" and "nothing to create" are successes. Re-running is
+the V1 idempotency: given the state after a previous run the planner proposes
+nothing.
+
+**Mock provider.** Uses the same planner and the same retry orchestration, applies
+the proposed rows to the mock assignment state (`source: 'auto'`, additive), and
+refuses a published or wholly past week with the same typed errors. Being a mock it
+has no transaction, lock or real concurrency (the stale path is never taken).
+
+**Tests:** `lib/autoRotaPlanner.test.ts`, `lib/autoRotaHash.test.ts`,
+`repositories/autoRotaOrchestration.test.ts`, `repositories/supabase/rota.test.ts`,
+`repositories/supabase/rotaErrors.test.ts`, `repositories/mock/rota.test.ts`.
 
