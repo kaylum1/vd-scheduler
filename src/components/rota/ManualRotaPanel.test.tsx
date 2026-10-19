@@ -673,14 +673,15 @@ describe('ManualRotaPanel: published weeks', () => {
     expect(screen.getByText(/This rota is published/)).toBeInTheDocument();
   });
 
-  it('29. there is no Publish / Unpublish / Retract / Auto-Rota control anywhere', async () => {
+  it('29. there is no Publish / Unpublish / Retract control anywhere; the only Auto-Rota control is Generate Rota, and it is disabled on a published week', async () => {
     mockRotaPublications.push({ resortId: CRANS, weekStart: FUTURE_WEEK, publishedAt: '2030-01-01T00:00:00Z', unpublishedAt: null });
     renderRota();
     const c = await findCard('Dinner');
     openPicker(c);
-    for (const name of [/publish/i, /unpublish/i, /retract/i, /auto/i, /generate/i, /balance/i]) {
+    for (const name of [/publish/i, /unpublish/i, /retract/i, /balance/i, /regenerate/i, /optimi[sz]e/i, /smart|ai /i]) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     }
+    expect(screen.getByRole('button', { name: 'Generate Rota' })).toBeDisabled();
   });
 });
 

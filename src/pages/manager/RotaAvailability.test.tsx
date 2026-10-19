@@ -160,3 +160,49 @@ describe('RotaAvailabilityPage: manager-only live rota', () => {
     expect(within(card).getByText('1 / 2 active assigned')).toBeInTheDocument();
   });
 });
+
+describe('RotaAvailabilityPage: Generate Rota (Auto-Rota)', () => {
+  it('names the SELECTED resort and week in the confirmation, follows resort changes, and Generate does not touch the Availability panel\'s data', async () => {
+    const availabilityRead = vi.spyOn(MockAvailabilityRepository.prototype, 'listAvailabilitySubmissionStatus');
+    const generate = vi.spyOn(MockRotaRepository.prototype, 'generateAutoRota');
+    renderPage();
+    await screen.findByRole('heading', { name: /Availability — Crans-Montana/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Next week' })); // next week always has its Monday Dinner still ahead
+    await screen.findByRole('article', { name: /^Dinner,/ });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Rota' }));
+    const dialog = screen.getByRole('dialog', { name: 'Generate rota?' });
+    expect(within(dialog).getByText('Crans-Montana')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    // A different resort: the dialog names that one.
+    fireEvent.click(screen.getByRole('tab', { name: 'Zermatt' }));
+    await screen.findByRole('heading', { name: /Availability — Zermatt/ });
+    const zermattButton = await screen.findByRole('button', { name: 'Generate Rota' });
+    await waitFor(() => expect(zermattButton).toBeEnabled());
+    fireEvent.click(zermattButton);
+    expect(within(screen.getByRole('dialog', { name: 'Generate rota?' })).getByText('Zermatt')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+    // Confirming runs ONE generation and re-reads only the manager rota -- availability answers are not part of it.
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Rota' }));
+    const readsBefore = availabilityRead.mock.calls.length;
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Generate Rota' }));
+    await screen.findByText(/No assignments could be added|No new assignments were needed|assignments? added/);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(availabilityRead.mock.calls.length).toBe(readsBefore);
+    expect(screen.getAllByRole('button', { name: 'Generate Rota' })).toHaveLength(1); // one control on the whole page
+  });
+
+  it('a result notice does not follow the manager to another week', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: /Availability — Crans-Montana/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Rota' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Generate Rota' }));
+    await screen.findByText(/No assignments could be added|No new assignments were needed|assignments? added/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next week' }));
+    await waitFor(() => expect(screen.queryByText(/No assignments could be added|No new assignments were needed|assignments? added/)).not.toBeInTheDocument());
+  });
+});

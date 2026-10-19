@@ -1146,3 +1146,67 @@ has no transaction, lock or real concurrency (the stale path is never taken).
 `repositories/autoRotaOrchestration.test.ts`, `repositories/supabase/rota.test.ts`,
 `repositories/supabase/rotaErrors.test.ts`, `repositories/mock/rota.test.ts`.
 
+---
+
+## Q. Auto-Rota — manager Generate Rota UI (AR-C)
+
+**Implemented.** The Generate Rota control lives in the existing Manual Rota card
+(header action) on Manager → Rota & Availability — there is no separate Auto-Rota
+page. It is scoped to the resort + week selected on that page. (Auto-Rota as a
+whole is not marked complete until its final end-to-end verification, AR-D.)
+
+**Offered when** the selected week is NOT published and has at least one shift
+dated today or later (today is not historical; a partially historical current
+week qualifies). **Disabled, with the reason as visible text** (linked to the
+button with `aria-describedby`): published — "Auto-Rota can’t run after this rota
+has been published."; every shift in the past — "Auto-Rota can’t generate a
+historical rota."; no shifts — "There are no shifts to fill this week." (the
+existing "No shifts are scheduled for this week." state stays, and the UI never
+calls the repository for such a week). Manual Rota editing is unaffected by
+Generate being disabled.
+
+**Flow.** One confirmation dialog (the shared `ConfirmDialog`/`Modal`, so focus is
+trapped, Escape closes, focus returns to the button) that names the resort and the
+week and says Auto-Rota keeps all existing assignments, only uses drivers marked
+Available, and fills open positions using the rota fairness rules (plus "Past
+shifts will not be changed." when the week has past shifts). **There is no
+preview** — no predicted names, counts or fairness scores; the database result
+AFTER generation is the authoritative outcome. Confirming calls
+`RotaRepository.generateAutoRota({ resortId, weekStart })` through a TanStack
+mutation; the UI never calls `apply_auto_rota`, builds the plan, or sees SQLSTATEs.
+While generating, the button and the dialog's actions are disabled and read
+"Generating…" (and the run cannot be dismissed); nothing else is frozen.
+
+**Result.** On success only the selected week's `managerRotaKeys.week` query is
+invalidated and re-read — the ordinary Manual Rota then shows the real generated
+assignments (never fabricated in component state); Availability, payroll,
+configuration and Driver My Rota are untouched. The notice, from the authoritative
+result: "N assignments added. All scheduled positions are covered." / "… M
+positions remain uncovered." / "No new assignments were needed. The rota is fully
+covered." / "No assignments could be added. M positions remain uncovered."
+(singular/plural handled). Leaving positions uncovered is a success, never an
+error: it is a status notice (info tone when nothing was added), the coverage
+pills stay authoritative, and Unavailable / Not Submitted drivers are never
+assigned to fill a gap. Generated assignments look like any other assignment (the
+domain keeps `source = auto`); the manager edits them with the normal controls.
+
+**Re-running** is safe and additive: the button stays "Generate Rota". Removing a
+generated assignment makes the shift Uncovered; generating again fills the
+current gap by current availability and fairness; a manual edit is respected by
+the next run; a fully covered week reports zero created.
+
+**Errors** are the repository's typed `AutoRotaError` with its first-party
+`userMessage`, shown in an inline alert while the rota stays visible. Published
+(including a publish that happened after the page loaded), historical and a
+stale plan that survived the repository's one retry also refetch the week, so the
+manager sees the current state (a publish race flips the chip to Published and
+disables Generate). There is no UI retry loop; the manager simply clicks again.
+
+**Lifecycle.** The notice and an open dialog belong to the resort + week they were
+produced for: changing either clears the notice and closes the dialog, and a
+result arriving after the manager moved away is not shown on the new selection
+(the old week's data is still refreshed).
+
+**Tests:** `components/rota/GenerateRota.test.tsx`, `components/rota/autoRotaUi.test.ts`,
+`pages/manager/RotaAvailability.test.tsx`, `components/rota/ManualRotaPanel.test.tsx`.
+

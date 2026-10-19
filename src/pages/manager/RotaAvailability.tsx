@@ -27,7 +27,7 @@ export function RotaAvailabilityPage() {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(getOperationalToday()));
   const weekStartIso = toISODate(weekStart);
 
-  const { activeResorts, selectedResortId, setSelectedResortId } = useActiveResortSelection();
+  const { activeResorts, selectedResortId, setSelectedResortId, selectedResort } = useActiveResortSelection();
 
   // Same hook + key as the Manual Rota panel, so this is one cache entry, not a second fetch.
   const rotaQuery = useManagerWeekRota(selectedResortId, weekStartIso);
@@ -49,7 +49,7 @@ export function RotaAvailabilityPage() {
         />
       </div>
 
-      <ManualRotaPanel resortId={selectedResortId} weekStart={weekStartIso} />
+      <ManualRotaPanel resortId={selectedResortId} weekStart={weekStartIso} resortName={selectedResort?.name} />
 
       <ManagerAvailabilityPanel resortId={selectedResortId} weekStart={weekStartIso} />
     </div>
