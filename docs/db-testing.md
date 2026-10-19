@@ -78,6 +78,8 @@ every other file's assertions as unrelated "transaction aborted" noise.
 | `95_payroll_rate_rpcs.sql` | `set_shift_base_pay_rate`/`set_driver_delivery_rate` atomicity, historical-safe reconciliation against the current open period, backdate/overlap rejection, security, audit (Stage 2D Payroll Checkpoint B) |
 | `97_payroll_rate_corrections.sql` | `correct_shift_base_pay_rate`/`correct_driver_delivery_rate` atomicity, same-day/historical/scheduled correction, in-place amount update (no new row, dates preserved), closed-period rejection, security, audit, regression proof that the ordinary future-change RPCs are unaffected (Stage 2D Payroll Checkpoint B.1) |
 
+**Time-of-day caution:** "today" in the product is the resort's *operational* date (Europe/Zurich), not `current_date` (UTC in the test session). For roughly 1–2 hours every night the two differ, so any assertion that compares an RPC's date against `current_date` can fail only in that window (this happened in `95_payroll_rate_rpcs`, fixed in Auto-Rota AR-D). New date-dependent tests must use `operational_today(resort)` (as `85`/`86` do).
+
 As of Auto-Rota checkpoint AR-A this suite has **524 assertions** across 15 files (432 before AR-A: 407 at the end of Manual Rota + 25 from LD-A; AR-A added the 92-assertion `86_auto_rota.sql` and one migration). That number will keep changing as the suite grows — don't
 chase a specific count; the point is that it stays genuinely comprehensive
 and, unlike its scratchpad predecessor, that it survives.

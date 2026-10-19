@@ -467,7 +467,7 @@ base pay/delivery rate — `<name>`") with its own audit-oriented helper text.
 
 ---
 
-## H. Shift staffing simplification and future Auto-Rota direction
+## H. Shift staffing simplification and Auto-Rota direction
 
 **Decided:** Stage 2D staffing simplification, replacing the abandoned
 manager-facing "Rota Rules" system (`rota_rules_default`/`weekday`/`date` —
@@ -519,7 +519,7 @@ staffing was added to the refresh comparison. A driver who said "Available"
 for a shift is still answering the same time window regardless of how many
 colleagues are also asked to work it.
 
-**F. Auto-Rota (design; the database layer is section O and the planner + repository section P — the Generate Rota UI is not built yet).** Is
+**F. Auto-Rota — IMPLEMENTED (V1 complete; database layer §O, planner + repository §P, Generate Rota UI §Q, summary and limitations §R).** It is
 built entirely from `shift_instances`/`required_drivers`/dates/driver
 resort/`availability`/`rota_assignments` — no Rota Rules, no High-value.
 Both `availability` (`available`/`unavailable`/absence=Not Submitted) and
@@ -548,8 +548,9 @@ already existed at the schema/RPC level (`availability`,
 `confirm_availability_week`, `reopen_availability_week`, the stale-
 invalidation trigger — all built in earlier checkpoints) real end to end:
 a live driver-facing page and manager-facing visibility, both through the
-repository layer. No Auto-Rota, no manual assignment, no attendance, no
-Onfleet, no payroll calculation.
+repository layer. (Scope of that checkpoint: no Auto-Rota, no manual assignment,
+no attendance, no Onfleet, no payroll calculation — Manual Rota and Auto-Rota
+have since been built.)
 
 **A. One answer per (driver, shift_instance).** `availability.status` is
 `'available'` or `'unavailable'` — a database CHECK constraint, only ever
@@ -626,8 +627,8 @@ mock Rota preview that used to sit below it has been removed. As of MR-C this
 panel is driven by `resortId`/`weekStart` props from the page and keeps no
 selection state of its own.
 
-**I. Future Auto-Rota's eligibility input (design constraint, not built).**
-Auto-Rota (§H above) must be able to query, per shift_instance: which
+**I. Auto-Rota's eligibility input (design constraint — now implemented, §P).**
+Auto-Rota (§H above) queries, per shift_instance: which
 drivers at that resort have `status = 'available'` — excluding both
 `status = 'unavailable'` and "no row at all" identically (neither is ever
 eligible). The repository/domain shapes built in this checkpoint
@@ -675,10 +676,10 @@ This section documents what the database guarantees; the repository / weekly
 read model (MR-B, section K) and the manager UI (MR-C, section L) are built on
 top of these rules and verified end to end in MR-D.
 
-**Manual assignment is deliberately more permissive than future Auto-Rota.**
+**Manual assignment is deliberately more permissive than Auto-Rota.**
 A manager has information the system doesn't (a WhatsApp message, a phone
-call), so manager control stays authoritative. Future Auto-Rota will treat
-both Unavailable *and* Not Submitted as ineligible (section H §F); manual
+call), so manager control stays authoritative. Auto-Rota (§O–§P) treats
+both Unavailable *and* Not Submitted as ineligible; manual
 assignment may override either, after an explicit acknowledgement.
 
 **Writes go through two atomic RPCs — and only through them.**
@@ -895,8 +896,8 @@ paginated and the API caps a response at `max_rows = 1000`, so it needs paging
 before any one resort-week could approach that (section K); and the Dashboard is still Stage 1.1 mock data. (Driver My Rota, which was
 also mock when this was written, is now live — section N.)
 
-**Not part of this checkpoint:** Auto-Rota, Publish UI, Attendance UI, live
-Driver My Rota, live Dashboard.
+**Not part of that checkpoint (MR-C):** Auto-Rota (built later — §O–§R), Publish UI,
+Attendance UI, live Driver My Rota (built later — §N), live Dashboard.
 
 **Tests:** `components/rota/ManualRotaPanel.test.tsx`,
 `pages/manager/RotaAvailability.test.tsx`,
@@ -1152,8 +1153,7 @@ has no transaction, lock or real concurrency (the stale path is never taken).
 
 **Implemented.** The Generate Rota control lives in the existing Manual Rota card
 (header action) on Manager → Rota & Availability — there is no separate Auto-Rota
-page. It is scoped to the resort + week selected on that page. (Auto-Rota as a
-whole is not marked complete until its final end-to-end verification, AR-D.)
+page. It is scoped to the resort + week selected on that page.
 
 **Offered when** the selected week is NOT published and has at least one shift
 dated today or later (today is not historical; a partially historical current
@@ -1209,4 +1209,48 @@ result arriving after the manager moved away is not shown on the new selection
 
 **Tests:** `components/rota/GenerateRota.test.tsx`, `components/rota/autoRotaUi.test.ts`,
 `pages/manager/RotaAvailability.test.tsx`, `components/rota/ManualRotaPanel.test.tsx`.
+
+---
+
+## R. Auto-Rota V1 — final status, verified behaviour and limitations (AR-D)
+
+**Auto-Rota V1 is IMPLEMENTED and COMPLETE** (database apply §O, planner and
+repository §P, manager UI §Q), verified end to end against real local Supabase
+with real sessions, mock mode, 375px mobile and keyboard use.
+
+**What it does (V1).** For one resort + Monday–Sunday week it proposes, with a pure
+deterministic planner, who fills each OPEN position, and the database applies the
+proposal atomically after re-validating every pair: only explicitly Available
+drivers for the exact shift (never Unavailable / Not Submitted, no override);
+weekend (Fri–Sun) bucket first, then weekday (Mon–Thu); most-constrained shift
+first within a bucket; per slot fewest bucket assignments → fewest total →
+weekly FNV-1a tie-break → `driverId`; active existing assignments (manual or
+auto, including a manual override) preserved and counted, inactive ones ignored
+(kept, never counted, never selected); never over-assigns and never repeats a
+driver on a shift; partial coverage and "nobody eligible" are successes; past
+shifts skipped (today allowed) while past assignments still count; a published
+week is refused by the server; re-running is additive and idempotent; generated
+rows are `source = auto`, audited with a run id, and are edited with the normal
+Manual Rota controls. It is serialized per resort + week with Manual Rota edits
+and publication writes, and a plan that went stale is re-read and re-planned once.
+
+**Verified-in-use examples (real Supabase).** Friday {A,B} / Saturday {A only}:
+Saturday goes to A and Friday to B; a lone driver Available for Saturday Lunch and
+Unavailable for Saturday Dinner is assigned Lunch only; a required-2 shift gets two
+distinct drivers (an inactive assignee does not count); a driver can hold two
+shifts on one day.
+
+**Known limitations — intentional V1 scope, not defects:**
+- **No overlap, daily-maximum, rest-period or weekly-maximum rule.** A driver may
+  receive several shifts the same day, even overlapping ones, if explicitly
+  Available for each.
+- **Fairness is per resort + week only** (no cross-week or cumulative fairness; the
+  weekly tie-break rotation only spreads equal ties).
+- **No bulk undo / "clear generated" / regenerate-from-scratch.** Removing a
+  generated assignment is manual, and re-running refills open slots (so a removed
+  auto assignment can be re-added by a later run).
+- The planner is a greedy heuristic (scarcity-first), not a global optimum.
+- **Nothing is visible to drivers until the week is published**, and there is no
+  Publish workflow yet (next checkpoint: minimal Publish Rota).
+- The availability read is bounded by the API's 1000-row cap (shifts × drivers).
 

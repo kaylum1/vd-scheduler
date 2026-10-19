@@ -252,20 +252,23 @@ declare
   v_today_result record;
   v_future_result record;
   v_rows integer;
+  -- The rate RPCs resolve "today" as the resort's OPERATIONAL date (Europe/Zurich), not the session's v_today
+  -- (UTC): the two differ for an hour or two every night, so this block must use the same definition.
+  v_today date := operational_today(current_setting('dbtest.resort_a')::uuid);
 begin
   select shift_type_id into v_shift_type from create_shift(
     current_setting('dbtest.resort_a')::uuid, 'Rate RPC Shift Today', '18:00'::time, '21:30'::time,
-    array[2]::smallint[], 1, (current_date - 90)::date, null
+    array[2]::smallint[], 1, (v_today - 90)::date, null
   );
 
   -- Set today's rate (no p_effective_from -- defaults to today).
   select * into v_today_result from set_shift_base_pay_rate(current_setting('dbtest.resort_a')::uuid, v_shift_type, 30.00);
   perform pg_temp.expect_true('set_shift_base_pay_rate: a rate set with no explicit date defaults to today',
-    v_today_result.effective_from = current_date);
+    v_today_result.effective_from = v_today);
 
   -- Schedule a genuine future change the SAME day.
   select * into v_future_result from set_shift_base_pay_rate(
-    current_setting('dbtest.resort_a')::uuid, v_shift_type, 35.00, (current_date + 20)::date
+    current_setting('dbtest.resort_a')::uuid, v_shift_type, 35.00, (v_today + 20)::date
   );
 
   select count(*) into v_rows from shift_base_pay_rules where shift_type_id = v_shift_type;
@@ -273,9 +276,9 @@ begin
     v_rows = 2, format('got %s row(s)', v_rows));
   perform pg_temp.expect_true('REGRESSION: today''s rate remains active and unchanged (still 30.00, still covers today)',
     (select base_pay_chf from shift_base_pay_rules where id = v_today_result.rule_id) = 30.00
-    and (select effective_to from shift_base_pay_rules where id = v_today_result.rule_id) = (current_date + 19)::date);
+    and (select effective_to from shift_base_pay_rules where id = v_today_result.rule_id) = (v_today + 19)::date);
   perform pg_temp.expect_true('REGRESSION: a lookup on today resolves 30.00 (the rate set today), not the future one',
     (select base_pay_chf from shift_base_pay_rules
      where shift_type_id = v_shift_type and is_active
-       and effective_from <= current_date and (effective_to is null or effective_to >= current_date)) = 30.00);
+       and effective_from <= v_today and (effective_to is null or effective_to >= v_today)) = 30.00);
 end $$;
