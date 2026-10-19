@@ -17,29 +17,10 @@ import {
   WEEKDAY_LABELS_FULL,
 } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
-import { getDataProvider } from '../../lib/env';
 import { getRepositories } from '../../repositories';
-import { resolveMockDriverIdentity } from '../../repositories/mock/identityBridge';
 import { useAuth } from '../../auth/AuthContext';
+import { useDriverRepositoryIdentity } from './useDriverRepositoryIdentity';
 import type { AvailabilityStatus, DriverVisibleShift } from '../../repositories/domain';
-
-/**
- * Resolves the current driver's identity in the id space the repository
- * layer expects. In Supabase mode `currentUser.driverId`/`resortId` already
- * are real database ids -- used directly. In mock mode they are Stage 1.1's
- * own driver-switcher ids instead (see repositories/mock/identityBridge.ts
- * for why `AuthContext` itself can't just switch this over), so this page
- * bridges them before calling into the repository layer.
- */
-function useDriverRepositoryIdentity(): { driverId: string | null; resortId: string | null } {
-  const { currentUser } = useAuth();
-  if (!currentUser || currentUser.role !== 'driver') return { driverId: null, resortId: null };
-  if (getDataProvider() === 'mock') {
-    const identity = resolveMockDriverIdentity(currentUser.driverId);
-    return { driverId: identity.driverId, resortId: identity.resortId };
-  }
-  return { driverId: currentUser.driverId, resortId: currentUser.resortId };
-}
 
 /**
  * Stage 3: the live Driver Availability page -- replaces the Stage 1.1

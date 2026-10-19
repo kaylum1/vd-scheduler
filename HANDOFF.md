@@ -1,10 +1,12 @@
 # Handoff — VD Scheduler & Payroll
 
-**Written:** 2026-10-14, at the end of Manual Rota checkpoint MR-D (full verification + documentation + handoff).
-**Branch:** `feature/manual-rota` (pushed; **no PR opened yet** — the user decides when).
+**Written:** 2026-10-19, at the end of the Live Driver My Rota checkpoint (LD-A database signal + LD-B/C/D repository, page, verification).
+**Branch:** `feature/live-driver-rota` (pushed; **no PR opened yet** — the user decides when). Manual Rota is already merged to `main` (PR #2).
 **Purpose:** let a fresh Claude Code session (no memory of any conversation) understand exactly what exists, why, and what to do next. Read it fully before touching code.
 
-**Exact next checkpoint: LIVE DRIVER MY ROTA — before the real Publish Rota UI.** See §N. Do not start it (or anything else listed in §K) without an explicit instruction.
+**IMPLEMENTED (live, real Supabase):** Driver Availability · Manual Rota · Driver My Rota · Configuration (drivers, resorts, shifts, payroll rate rules).
+**NOT YET IMPLEMENTED:** real manager **Publish Rota** workflow · **Auto-Rota** · **Attendance** · live manager **Dashboard** · full payroll calculation / finalisation · Onfleet ingestion.
+**Exact next checkpoint: AUTO-ROTA** (explicitly part of the main V1 plan), then a **minimal Publish Rota**, then the remaining operational/payroll work. See §N. Do not start it (or anything else in §K) without an explicit instruction.
 
 ---
 
@@ -22,12 +24,12 @@ VD Scheduler & Payroll is a Supabase-backed scheduling / rota / payroll app for 
 
 - **Configuration** → Drivers (create/edit/deactivate, preferred language), **Resorts** (create/deactivate/reactivate; deactivation blocked while anything operational depends on it), **Resort & Shift Setup** (one manager-facing "Shift": name, start/end, weekdays, effective period, required drivers; refresh/cancel previews), **Payroll Rules** (shift base pay + per-driver delivery rate, effective-dated, Change vs Correct).
 - **Rota & Availability** (`#/manager/rota`): one resort selector + one week navigator shared by two live panels — the **Manual Rota** (assign / remove drivers on real shift instances, coverage, historical/published handling; §F) and the **Availability** panel (per-driver status and per-shift answers, read-only).
-- **Still Stage 1.1 mock:** the manager **Dashboard** (§K).
+- **Still Stage 1.1 mock:** the manager **Dashboard** (§K). There is **no Publish control** anywhere yet — weeks are published only by writing `rota_publications` directly (testing).
 
 ## C. Driver features
 
 - **Availability** (`#/driver/availability`, live): answer each shift independently, partial save, explicit Confirm / Reopen, publication lock enforced by RLS ("Availability locked"), "Needs reconfirmation" after a real change (§H trigger).
-- **My Rota** (`#/driver/my-rota`): **still Stage 1.1 mock** — it shows fabricated data, not the manager's real assignments. This is the reason it is the next checkpoint (§N).
+- **My Rota** (`#/driver/my-rota`, **live**): the driver's own published shifts for one Monday–Sunday week, read-only. Tells apart "not published yet" / "no rota was published" (past) / "published, nothing for you" / published with shifts; real "Published"/"Not published" chip; several shifts per day; past published weeks viewable; always-stale query (refetches on mount, week change, focus) so manager edits to a published week appear without republishing. Details in §F2.
 
 ## D. Shift model
 
@@ -53,6 +55,13 @@ One answer per (driver, shift_instance): `available` / `unavailable` — **no ro
 **MR-D verification (real local Supabase, real manager + real driver logins):** all flows passed — page load, shared resort/week switching, Available / Unavailable / Not Submitted, stale-client race (driver flips availability behind the page), coverage transitions, over-assignment, combined warning, remove, attendance guard, historical (UI read-only + direct RPC 55006), inactive assignee, published-week edit with untouched publication row and audit rows, driver privacy (13/13 REST checks: no base-table read, no RPC, no audit, own availability only, safe view leaks no co-driver/headcount), manager RPC-only writes (6/6), zero-shift weeks and Verbier, multiple shifts per day, duplicate / assignment-gone / attendance messages, mock-mode regression, 375px mobile walkthrough, keyboard/accessibility pass.
 **MR-D fixes (tiny, found by the walkthrough):** (1) dialogs now name the shift; (2) the shared `Modal` now traps Tab/Shift+Tab, and returns focus to the opener on close (`Modal.test.tsx`).
 
+## F2. Live Driver My Rota (complete)
+
+- **DB (LD-A, migration `20261019100000_driver_safe_publication_status.sql`):** new view `driver_visible_week_publications (resort_id, week_start)` — one row per currently published week of the caller's OWN resort (owner-executed, session-resolved, no driver/resort input, anon rejected). Drivers' direct SELECT policy on `rota_publications` was **dropped** (it exposed `published_by`/`generation_source`); drivers now use only the two safe views. Availability's lock is SECURITY DEFINER code and unaffected. `driver_visible_assignments` unchanged.
+- **Repository:** `RotaRepository.getDriverWeekRota({ weekStart, driverId })` → `DriverWeekRota { weekStart, isPublished, shifts: DriverRotaShift[] }` (`DriverRotaShift { shiftInstanceId, date, shiftName, startTime, endTime }`, HH:MM). Pure builder `repositories/driverRotaModel.ts` shared by both providers (sorted date/start/name; unpublished ⇒ always empty). The old all-history `listDriverVisibleAssignments` was removed. **Supabase never sends `driverId`** — two parallel week-scoped view reads; identity is the session. The mock uses `driverId` (no session) and has **no default published week** (dev mock shows "not published yet"; tests publish explicitly).
+- **UI:** `pages/driver/MyRota.tsx`, `components/driver-rota/{useDriverWeekRota,DriverRotaDay}`, shared `pages/driver/useDriverRepositoryIdentity.ts` (extracted from Availability; mock-mode identity bridge). Query key `driverRotaKeys.week(driverId, weekStart)`, `staleTime: 0`, `refetchOnWindowFocus: true`; no polling/realtime. A small `white-space: nowrap` on `.week-nav__relation` stops "This Week" wrapping at 375px.
+- **Verified against real local Supabase** (real manager/driver logins, publish done directly in the DB because no Publish UI exists): unpublished (even with a hidden draft assignment), published-with-shifts (two shifts same day), published-none, far-future, past never-published, past published, cancelled shift hidden, second same-resort driver sees only their own shifts, manager remove+add on the published week shows after focus refetch with the publication row untouched, REST privacy checks (no base-table access, no unsafe columns, no co-driver/other-resort data, `assign_driver` denied), 375px mobile incl. error + Retry, keyboard/semantics, Driver Availability still locked/editable correctly.
+
 ## G. Payroll model (rates only — no payroll calculation yet)
 
 `worked_shift_pay = MAX(shift base guarantee, delivery_total)`, only for `attendance.status = 'worked'`. Shift base pay belongs to the Shift (`shift_base_pay_rules`); delivery rate belongs to the driver (`driver_delivery_rates`); both effective-dated with GIST no-overlap exclusion; `shift_instances` owns **zero** financial data (rates are resolved at calculation time against the real date). `set_*_rate` = Change (schedule future, strict `effective_from > today` to replace a not-yet-started plan in place); `correct_*_rate` = Correct (fix amount of a still-open row, never dates; closed periods rejected 55006). A future finalisation guard on corrections is documented, not built (no `driver_shift_payroll` table). Late-delivery double pay is a documented future design only.
@@ -70,27 +79,29 @@ One answer per (driver, shift_instance): `available` / `unavailable` — **no ro
 
 `src/repositories/`: `types.ts` (interfaces), `domain.ts` (domain types), `errors.ts`, `queryKeys.ts`, `index.ts` (factory), `mock/*` and `supabase/*` (parallel providers), `managerRotaModel.ts` (pure builder fed by both providers so they can't drift). React code talks to `getRepositories()` only — never Supabase. Mock provider fidelity is a real maintenance burden: it mirrors DB semantics where practical but has no persisted `shift_instances`, no DB triggers, and (for Manual Rota) no attendance, audit or cancelled shifts; tests that need trigger outcomes fabricate the resulting row. Mock instance ids are `${templateId}-${date}`.
 **Two id spaces in mock mode:** the Stage 1.1 driver switcher uses `'gianni'`-style ids; repository mock fixtures use `'mock-gianni'`. `repositories/mock/identityBridge.ts` bridges by **name** and is used only by the live Availability page. Any new live driver page must reuse it in mock mode (Supabase mode ids are already real). Consider centralising it in `useAuth()` when Live Driver My Rota needs it.
+Driver-facing reads are separate read models (`DriverWeekRota` + `driverRotaModel.ts`) and never reuse `ManagerWeekRota`; an import-boundary test keeps driver pages/components off Supabase and the manager surface.
 Shared UI: `ResortSelector` + `useActiveResortSelection` (`components/ui/ResortSelector.tsx`), `Modal`/`ConfirmDialog`, `StatusPill`, `InlineNotice`.
 
-## J. Test baselines (MR-D, from a clean reset)
+## J. Test baselines (end of Live Driver My Rota, from a clean reset)
 
 ```
-npm run db:reset:test && npm run test:db   → 407 assertions, 0 failed, 14 files
-npx vitest run (VITE_DATA_PROVIDER=mock)    → 548 passed, 37 files
+npm run db:reset:test && npm run test:db   → 432 assertions, 0 failed, 14 files
+npx vitest run (VITE_DATA_PROVIDER=mock)    → 589 passed, 39 files
 npm run build                               → clean (tsc -b && vite build); only the pre-existing >500 kB chunk warning
 ```
-DB groups: 00_core_schema 19 · 10_availability_publication 30 · 20_assignments_attendance_adjustments 14 · 30_security_rls_audit 35 · 35_driver_safe_views 8 · 40_materialisation_template_safety 35 · 50_language_onfleet 12 · 60_shift_staffing 21 · 70_atomic_shift_rpcs 27 · 80_resort_lifecycle 36 · 85_manual_rota_assignments 87 · 90_payroll_rate_foundations 29 · 95_payroll_rate_rpcs 31 · 97_payroll_rate_corrections 23.
-**Count history:** PR #1 baseline 360 frontend / 320 DB → MR-A +87 DB (407) → MR-B/MR-C → 544 frontend → MR-D +4 (1 dialog-names-the-shift test, 3 `Modal` focus tests) = 548. DB unchanged in MR-D.
+DB groups: 00_core_schema 19 · 10_availability_publication 30 · 20_assignments_attendance_adjustments 14 · 30_security_rls_audit 35 · 35_driver_safe_views 33 · 40_materialisation_template_safety 35 · 50_language_onfleet 12 · 60_shift_staffing 21 · 70_atomic_shift_rpcs 27 · 80_resort_lifecycle 36 · 85_manual_rota_assignments 87 · 90_payroll_rate_foundations 29 · 95_payroll_rate_rpcs 31 · 97_payroll_rate_corrections 23.
+**Count history:** PR #1 baseline 360 frontend / 320 DB → Manual Rota end (MR-D) 548 frontend / 407 DB → LD-A +25 DB (35_driver_safe_views 8→33, one migration) → Live Driver My Rota +41 frontend (builder 7, Supabase adapter 10, mock adapter 9, page 16 = 42, minus the obsolete `listDriverVisibleAssignments` mock test that was replaced) = 589 / 432.
 **Reproduce:** `npx supabase start` → `npm run db:reset:test` → `npm run test:db`; `cat .env.local` must say `mock` before `npx vitest run`. If `.env.local` is `supabase` the suite fails en masse — run `VITE_DATA_PROVIDER=mock npx vitest run` or revert the file. `src/repositories/supabase/resorts.integration.test.ts` talks to the live local stack with the anon key. After `db:reset:test`, run `npm run seed:local-users` to recreate the local logins (`manager@`, `gianni@`, `alex@vd-scheduler.local`; local dev password in `scripts/seed-local-test-users.mjs`).
 
 ## K. Known limitations (all deliberate and documented)
 
-- **Dashboard** and **Driver My Rota** are still Stage 1.1 mock data (`src/mock-data/*`): the Dashboard can show an uncovered Verbier Dinner while the live rota correctly shows no shifts. Not to be papered over by mixing real shifts into mock pages.
-- **No Publish Rota UI** (the real publish RPC/UI doesn't exist; the fake preview button was removed in MR-C). **No Auto-Rota.** **No Attendance UI** (the attendance guard exists in the DB). **No Onfleet integration, no payroll calculation.**
+- The manager **Dashboard** is still Stage 1.1 mock data (`src/mock-data/*`): it can show an uncovered Verbier Dinner while the live rota correctly shows no shifts. Not to be papered over by mixing real shifts into the mock page. (Driver My Rota is now live.)
+- **No Publish Rota UI** (the real publish RPC/UI doesn't exist; the fake preview button was removed in MR-C) — publishing is a direct `rota_publications` write, used only for testing. Until Publish exists, drivers never see a rota in real use. **No Auto-Rota.** **No Attendance UI** (the attendance guard exists in the DB). **No Onfleet integration, no payroll calculation.**
 - **No same-driver overlap protection** — a driver can be assigned to overlapping shifts on the same day. **No confirmation on Remove.**
 - **Mock revision-ID limitation:** a mock `reviseShift` that recreates a template changes mock instance ids, orphaning mock assignments (the real DB keeps instance identity).
 - **Shared `rule_violation` SQLSTATE:** `23514` covers inactive driver / other resort / cancelled shift / over-long reason with no DETAIL, so the repository maps them to one `rule_violation` kind and relies on the DB's first-party message. Distinct kinds need a small DETAIL addition (new migration) — not done.
 - **API `max_rows = 1000`:** the manager availability read returns shifts × drivers rows; page it before one resort-week could approach 1000.
+- Driver My Rota refreshes on mount / week change / focus only — there is no push; a driver with the app open sees a manager's edit on the next focus or navigation. The dev mock provider has no default published week, so mock-mode My Rota always reads "not published yet" until a test publishes one.
 - After a stale-data failure the assign dialog stays open (server message shown, refreshed week behind it); Cancel closes it.
 - **iCloud:** this project lives on `~/Desktop`, which iCloud can evict (`node_modules` → ETIMEDOUT / vitest hangs). Check `find node_modules -flags +dataless | head`, re-materialise; never commit workarounds, never restructure the repo for it.
 - Bundle-size warning (>500 kB) is cosmetic and pre-existing.
@@ -106,25 +117,24 @@ DB groups: 00_core_schema 19 · 10_availability_publication 30 · 20_assignments
 
 ## M. Git history and status
 
-- `origin/main` includes PR #1 (merge commit `76c6030`, "Merge pull request #1 from kaylum1/feature/payroll-staffing-and-availability").
-- `feature/manual-rota` (branched from `main` after that merge), oldest → newest:
+- `origin/main` includes PR #1 (merge `76c6030`) and PR #2 — Manual Rota (merge `dd2ca93`: MR-A `c780cd3`, MR-B `30f7432`, MR-C `66e6f3d`, MR-D `19fdc5a`).
+- `feature/live-driver-rota` (branched from `main` at `dd2ca93`), oldest → newest:
   ```
-  c780cd3  Add manual rota assignment RPCs        (MR-A, DB)
-  30f7432  Add manual rota repository             (MR-B)
-  66e6f3d  Add live manual rota UI                (MR-C)
-  <latest> Complete manual rota checkpoint        (MR-D: verification fixes + docs + this handoff)
+  02cccf8  Add driver-safe publication status   (LD-A, DB: publication view, driver table access removed)
+  <latest> Add live driver rota                 (repository, page, tests, verification, docs, this handoff)
   ```
-  (the pre-Manual-Rota cleanup `728bde1` "Prepare manual rota foundation" is already on `main` via PR #1.)
-- **No PR exists for `feature/manual-rota`.** Do not open one without being asked. When it is merged, branch the next checkpoint from the updated `main`; until then, branch from `feature/manual-rota` only if the user says so.
+- **No PR exists for `feature/live-driver-rota`.** Do not open one without being asked. When it is merged, branch the next checkpoint from the updated `main`.
+- **iCloud warning (recurring, real):** the project is under `~/Desktop`; iCloud evicts `.git` objects and `node_modules` files. Symptoms: `git checkout` hanging for many minutes, vitest/tsc hanging, `ETIMEDOUT`, rollup "does not provide an export named VERSION" (a dataless file reads as empty). Check `find . -flags +dataless -type f | wc -l`; re-materialise with a parallel `cat`; for stubborn `node_modules` files run `npm ci` (local only). Never commit workarounds; the real fix (moving the repo out of iCloud-synced storage) is the user's call.
 
-## N. Exact next checkpoint — LIVE DRIVER MY ROTA (before the real Publish Rota UI)
+## N. Exact next checkpoint — AUTO-ROTA
 
-**Why this, why now:** Manual Rota is complete, so real manager assignments now exist in the database, but the driver's **My Rota** is still the Stage 1.1 mock — a driver cannot see any of them. Building Publish Rota first would let a manager "publish" a rota that drivers literally cannot see. Making My Rota live first gives Publish something real to publish *to*, lets the published-week rules (manager edits are visible immediately) be verified from the driver side, and is the lower-risk, read-only slice.
+**Decided:** Auto-Rota is part of the main V1 plan and is the next product feature; after it comes a **minimal Publish Rota**, then the remaining operational/payroll work (Attendance, live Dashboard, payroll calculation/finalisation, Onfleet ingestion). **None of Auto-Rota is built — do not describe it as implemented.**
 
-**Sketch (for the architecture review the user will ask for first — do not start before then):**
-- Read only through the existing driver-safe views (`driver_visible_assignments` / `driver_visible_shifts`: published weeks only, no co-driver, no headcount, no pay) via a new driver-facing repository method on both providers; never reuse the manager `ManagerWeekRota` shapes (privacy boundary).
-- Replace `src/pages/driver/MyRota.tsx` (Stage 1.1) and reuse the mock identity bridge (§I) for mock mode; decide whether to centralise it in `useAuth()`.
-- Decide: week navigation, empty/unpublished states ("Once the manager publishes…"), how a manager's later edit to a published week appears, and whether any "changed since you last looked" signal is wanted (likely not in V1).
-- Needs real-Supabase walkthrough with a real driver login plus REST privacy checks (the MR-D `privacy` script pattern: base table empty, no RPC, no co-driver leakage).
+**Why Auto-Rota next:** the manual path (Manual Rota → Driver My Rota) now works end to end against real Supabase, so the remaining large gap in the core scheduling loop is generating a good rota instead of hand-assigning every shift.
 
-**After that (not started, do not begin):** real Publish Rota UI + RPC → live Dashboard → Attendance UI → Auto-Rota (design in `docs/business-rules.md` §H) → Onfleet → payroll calculation.
+**Where the design already lives (read before the architecture review the user will ask for first):**
+- `docs/business-rules.md` §H.F: weekend-first (Fri/Sat/Sun) then weekday (Mon–Thu) allocation, computed per resort per week; coverage beats fairness; availability is a HARD constraint (only explicit "Available" counts — Not Submitted and Unavailable are ineligible, unlike manual assignment); deterministic tie-breaking (fewest assignments in phase → fewest total → `drivers.created_at` → `drivers.id`, never randomness); a multi-driver Shift needs that many DISTINCT drivers; existing manual assignments are preserved and counted before allocation; no High-value/premium concept.
+- `rota_assignments.assignment_source` already allows `'auto'`; `assign_driver`/`unassign_driver` (§F) are the manual write path and own the assignment rules (active driver, same resort, duplicate, past dates, attendance guard) — an Auto-Rota writer should reuse those invariants rather than re-implement them.
+- Known gaps it will meet: no same-driver overlap protection (§K), no Publish workflow yet, the `max_rows = 1000` availability read.
+- Open product questions for the architecture review: preview-then-apply vs apply directly, regenerate semantics when manual assignments exist, how coverage shortfalls are reported, and whether auto-assigned rows are visually distinguished in Manual Rota.
+

@@ -363,3 +363,136 @@ describe('SupabaseRotaRepository writes go through the RPCs ONLY', () => {
     expect(rotaAdapterSource).toMatch(/\.rpc\('unassign_driver'/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Live Driver My Rota: getDriverWeekRota
+// ---------------------------------------------------------------------------
+
+const DRIVER_WEEK = '2030-01-07';
+
+const myAssignmentRow = (shiftInstanceId: string, over: Row = {}): Row => ({
+  assignment_id: `assignment-${shiftInstanceId}`,
+  shift_instance_id: shiftInstanceId,
+  resort_id: RESORT,
+  date: '2030-01-07',
+  week_start: DRIVER_WEEK,
+  shift_key: 'dinner',
+  name: 'Dinner',
+  start_time: '18:00:00',
+  end_time: '21:30:00',
+  ...over,
+});
+
+const publicationRow = (week = DRIVER_WEEK): Row => ({ resort_id: RESORT, week_start: week });
+
+describe('SupabaseRotaRepository.getDriverWeekRota', () => {
+  const read = (tables: Record<string, Row[]>, params: { weekStart?: string; driverId?: string } = {}) => {
+    const fake = createFakeClient(tables);
+    const promise = new SupabaseRotaRepository(fake.client).getDriverWeekRota({ weekStart: params.weekStart ?? DRIVER_WEEK, driverId: params.driverId ?? 'd-me' });
+    return { fake, promise };
+  };
+
+  it('6. a publication row maps to isPublished = true', async () => {
+    const { promise } = read({ driver_visible_week_publications: [publicationRow()], driver_visible_assignments: [] });
+    expect((await promise).isPublished).toBe(true);
+  });
+
+  it('7. no publication row maps to isPublished = false, and shifts are empty', async () => {
+    const { promise } = read({ driver_visible_week_publications: [], driver_visible_assignments: [] });
+    expect(await promise).toEqual({ weekStart: DRIVER_WEEK, isPublished: false, shifts: [] });
+  });
+
+  it('8. reads exactly two views, each scoped to the selected week only', async () => {
+    const { fake, promise } = read({
+      driver_visible_week_publications: [publicationRow(), publicationRow('2030-01-14')],
+      driver_visible_assignments: [myAssignmentRow('si-mon'), myAssignmentRow('si-next-week', { week_start: '2030-01-14', date: '2030-01-14' })],
+    });
+    const rota = await promise;
+
+    expect(fake.queries.map((q) => q.table).sort()).toEqual(['driver_visible_assignments', 'driver_visible_week_publications']);
+    for (const q of fake.queries) expect(q.filters).toEqual([{ op: 'eq', column: 'week_start', value: DRIVER_WEEK }]);
+    expect(rota.shifts.map((s) => s.shiftInstanceId)).toEqual(['si-mon']);
+  });
+
+  it('9. the driver id is NEVER sent to the database as a filter -- the session decides, so another id changes nothing', async () => {
+    const tables = { driver_visible_week_publications: [publicationRow()], driver_visible_assignments: [myAssignmentRow('si-mon')] };
+    const mine = read(tables, { driverId: 'd-me' });
+    const someoneElse = read(tables, { driverId: 'd-someone-else' });
+    const [a, b] = [await mine.promise, await someoneElse.promise];
+
+    expect(b).toEqual(a);
+    expect(someoneElse.fake.queries).toEqual(mine.fake.queries);
+    for (const q of someoneElse.fake.queries) {
+      expect(q.filters.map((f) => f.column)).toEqual(['week_start']);
+      expect(JSON.stringify(q)).not.toContain('d-someone-else');
+    }
+    expect(someoneElse.fake.rpcCalls).toEqual([]);
+  });
+
+  it('10. a published week with zero own assignments is published with no shifts (distinct from unpublished)', async () => {
+    const { promise } = read({ driver_visible_week_publications: [publicationRow()], driver_visible_assignments: [] });
+    expect(await promise).toEqual({ weekStart: DRIVER_WEEK, isPublished: true, shifts: [] });
+  });
+
+  it('11. maps published assignments: name, HH:MM times, date; several shifts on one day; deterministic order', async () => {
+    const { promise } = read({
+      driver_visible_week_publications: [publicationRow()],
+      driver_visible_assignments: [
+        myAssignmentRow('si-fri-dinner', { date: '2030-01-11', name: 'Dinner (2P)' }),
+        myAssignmentRow('si-fri-lunch', { date: '2030-01-11', name: 'Lunch', start_time: '12:00:00', end_time: '14:00:00' }),
+        myAssignmentRow('si-mon'),
+      ],
+    });
+    expect((await promise).shifts).toEqual([
+      { shiftInstanceId: 'si-mon', date: '2030-01-07', shiftName: 'Dinner', startTime: '18:00', endTime: '21:30' },
+      { shiftInstanceId: 'si-fri-lunch', date: '2030-01-11', shiftName: 'Lunch', startTime: '12:00', endTime: '14:00' },
+      { shiftInstanceId: 'si-fri-dinner', date: '2030-01-11', shiftName: 'Dinner (2P)', startTime: '18:00', endTime: '21:30' },
+    ]);
+  });
+
+  it('12. never touches rota_assignments (or any other base table) and never writes', async () => {
+    const { fake, promise } = read({
+      rota_assignments: [{ id: 'x', shift_instance_id: 'si-mon', driver_id: 'd-other' }],
+      driver_visible_week_publications: [publicationRow()],
+      driver_visible_assignments: [myAssignmentRow('si-mon')],
+    });
+    await promise;
+    expect(fake.queries.some((q) => q.table === 'rota_assignments')).toBe(false);
+    expect(fake.writes).toEqual([]);
+  });
+
+  it('13. never touches rota_publications -- publication state comes only from the driver-safe view', async () => {
+    const { fake, promise } = read({
+      rota_publications: [{ resort_id: RESORT, week_start: DRIVER_WEEK, published_by: 'manager-secret', generation_source: 'manual' }],
+      driver_visible_week_publications: [],
+      driver_visible_assignments: [],
+    });
+    const rota = await promise;
+    expect(fake.queries.some((q) => q.table === 'rota_publications')).toBe(false);
+    expect(rota.isPublished).toBe(false);
+  });
+
+  it('the returned rota carries no manager, colleague, source or audit data even if the underlying rows had extra columns', async () => {
+    const { promise } = read({
+      driver_visible_week_publications: [{ ...publicationRow(), published_by: 'manager-secret' }],
+      driver_visible_assignments: [myAssignmentRow('si-mon', { required_drivers: 4, assignment_source: 'manual', assigned_by: 'manager-secret', driver_id: 'd-other', reason: 'override' })],
+    });
+    const json = JSON.stringify(await promise);
+    expect(json).not.toMatch(/manager-secret|required_drivers|assignment_source|d-other|override|assigned_by/);
+  });
+
+  it('turns a database failure into a RepositoryError (no raw error leaks)', async () => {
+    const client = {
+      from() {
+        const b: Record<string, unknown> = {
+          select: () => b,
+          eq: () => b,
+          order: () => b,
+          then: (resolve: (v: unknown) => unknown) => Promise.resolve({ data: null, error: { message: 'boom', code: 'XX000' } }).then(resolve),
+        };
+        return b;
+      },
+    } as unknown as SupabaseClient<Database>;
+    await expect(new SupabaseRotaRepository(client).getDriverWeekRota({ weekStart: DRIVER_WEEK, driverId: 'd-me' })).rejects.toBeInstanceOf(RepositoryError);
+  });
+});

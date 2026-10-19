@@ -1,105 +1,104 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { WeekNav } from '../../components/rota/WeekNav';
-import { Card } from '../../components/ui/Card';
+import { WeekNav, getWeekRelation } from '../../components/rota/WeekNav';
+import { DriverRotaDay } from '../../components/driver-rota/DriverRotaDay';
+import { useDriverWeekRota } from '../../components/driver-rota/useDriverWeekRota';
 import { Badge } from '../../components/ui/Badge';
-import { StatusPill } from '../../components/ui/StatusPill';
+import { Button } from '../../components/ui/Button';
+import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
-import { IconCalendar, IconClock } from '../../components/ui/icons';
-import { addWeeks, getWeekDates, isToday, startOfWeek, toISODate, WEEKDAY_LABELS } from '../../mock-data/date-utils';
+import { StatusPill } from '../../components/ui/StatusPill';
+import { IconCalendar } from '../../components/ui/icons';
+import { addWeeks, parseISODate, startOfWeek, toISODate } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
-import { driverById } from '../../mock-data/drivers';
-import { resortById } from '../../mock-data/resorts';
-import { generateWeekShiftInstances } from '../../mock-data/shifts';
-import { useAuth } from '../../auth/AuthContext';
+import { useDriverRepositoryIdentity } from './useDriverRepositoryIdentity';
+import type { DriverRotaShift } from '../../repositories/domain';
 
+/**
+ * Live Driver My Rota: the signed-in driver's OWN published shifts for one
+ * operational (Monday-Sunday, Europe/Zurich) week, read through the repository
+ * layer only. Read-only -- there is nothing a driver can change here, and no
+ * availability or pay information is shown (Availability is its own page).
+ *
+ * It tells three situations apart, because they mean different things to a
+ * driver: the week is not published yet / no rota was published, the week is
+ * published but the driver has nothing, and the week is published with shifts.
+ * A manager may still edit a published week; the query refetches (see
+ * useDriverWeekRota), so those edits appear without any re-publishing.
+ */
 export function MyRotaPage() {
-  // Driver identity comes from useAuth() (real app_users-backed identity
-  // in Supabase mode; the same value useAppState().activeDriverId would
-  // give in mock mode) — not a client-side toggle, so one driver's
-  // session can never coincidentally render another driver's mock rota.
-  const { currentUser } = useAuth();
-  const activeDriverId = currentUser?.role === 'driver' ? currentUser.driverId : '';
-  // The current week is operational (Europe/Zurich) data — see
-  // src/lib/operationalTime.ts — not the viewer's browser timezone.
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(getOperationalToday()));
-  const driver = driverById(activeDriverId);
+  const { driverId } = useDriverRepositoryIdentity();
+  // The current week is operational (Europe/Zurich) data -- see
+  // src/lib/operationalTime.ts -- not the viewer's browser timezone.
+  const [weekStartIso, setWeekStartIso] = useState(() => toISODate(startOfWeek(getOperationalToday())));
+  const weekStart = parseISODate(weekStartIso);
+  const goToWeek = (date: Date) => setWeekStartIso(toISODate(date));
 
-  const isCurrentWeek = weekStart.getTime() === startOfWeek(getOperationalToday()).getTime();
-  const shifts = driver
-    ? generateWeekShiftInstances(weekStart, isCurrentWeek).filter(
-        (s) => s.resortId === driver.resortId && s.assignedDriverIds.includes(driver.id)
-      )
-    : [];
+  const rotaQuery = useDriverWeekRota(driverId, weekStartIso);
+  const rota = rotaQuery.data;
+  const isPastWeek = getWeekRelation(weekStart) === 'archive';
 
-  const shiftsByDate = new Map<string, typeof shifts>();
-  for (const shift of shifts) {
-    const list = shiftsByDate.get(shift.date) ?? [];
-    list.push(shift);
-    shiftsByDate.set(shift.date, list);
-  }
+  const days = useMemo(() => {
+    const byDate = new Map<string, DriverRotaShift[]>();
+    for (const shift of rota?.shifts ?? []) {
+      const list = byDate.get(shift.date) ?? [];
+      list.push(shift);
+      byDate.set(shift.date, list);
+    }
+    // The repository already returns shifts ordered by date; Map preserves that.
+    return [...byDate.entries()];
+  }, [rota]);
 
-  const dates = getWeekDates(weekStart);
-  const totalHoursThisWeek = shifts.reduce((sum, s) => {
-    const [sh, sm] = s.startTime.split(':').map(Number);
-    const [eh, em] = s.endTime.split(':').map(Number);
-    return sum + (eh * 60 + em - (sh * 60 + sm)) / 60;
-  }, 0);
+  const today = toISODate(getOperationalToday());
 
   return (
     <div className="page">
       <PageHeader
         title="My Rota"
-        subtitle={driver ? `${driver.name} · ${resortById(driver.resortId)?.name}` : undefined}
         actions={
           <WeekNav
             weekStart={weekStart}
-            onPrev={() => setWeekStart((d) => addWeeks(d, -1))}
-            onNext={() => setWeekStart((d) => addWeeks(d, 1))}
-            onThisWeek={() => setWeekStart(startOfWeek(getOperationalToday()))}
+            onPrev={() => goToWeek(addWeeks(weekStart, -1))}
+            onNext={() => goToWeek(addWeeks(weekStart, 1))}
+            onThisWeek={() => goToWeek(startOfWeek(getOperationalToday()))}
+            statusChip={rota ? <StatusPill tone={rota.isPublished ? 'green' : 'grey'}>{rota.isPublished ? 'Published' : 'Not published'}</StatusPill> : undefined}
           />
         }
       />
 
-      <div className="driver-week-summary">
-        <Badge>{shifts.length} shift{shifts.length === 1 ? '' : 's'} this week</Badge>
-        <Badge>{totalHoursThisWeek.toFixed(1)} hours scheduled</Badge>
-        {isCurrentWeek && <Badge tone="blue">Published</Badge>}
-      </div>
+      {rota && rota.shifts.length > 0 && (
+        <div className="driver-week-summary">
+          <Badge>
+            {rota.shifts.length} shift{rota.shifts.length === 1 ? '' : 's'}
+          </Badge>
+        </div>
+      )}
 
       <Card>
-        {shifts.length === 0 ? (
+        {rotaQuery.isLoading ? (
+          <div className="config-loading" role="status">
+            Loading your rota…
+          </div>
+        ) : rotaQuery.isError || !rota ? (
+          <div className="config-error" role="alert">
+            <p>Couldn’t load your rota</p>
+            <Button variant="secondary" size="sm" onClick={() => rotaQuery.refetch()}>
+              Retry
+            </Button>
+          </div>
+        ) : !rota.isPublished ? (
           <EmptyState
             icon={<IconCalendar />}
-            title="No shifts scheduled this week"
-            hint="Once the manager publishes the rota, your assigned shifts will appear here."
+            title={isPastWeek ? 'No rota was published for this week.' : 'Your rota for this week hasn’t been published yet.'}
           />
+        ) : rota.shifts.length === 0 ? (
+          <EmptyState icon={<IconCalendar />} title="You don’t have any shifts assigned this week." />
         ) : (
-          dates.map((date, i) => {
-            const dayShifts = shiftsByDate.get(toISODate(date)) ?? [];
-            if (dayShifts.length === 0) return null;
-            return (
-              <div key={toISODate(date)}>
-                {dayShifts.map((shift) => (
-                  <div className="driver-shift-item" key={shift.id}>
-                    <div className="driver-shift-item__date">
-                      <div className="driver-shift-item__date-day">{date.getDate()}</div>
-                      <div className="driver-shift-item__date-weekday">{WEEKDAY_LABELS[i]}</div>
-                    </div>
-                    <div className="driver-shift-item__body">
-                      <div className="driver-shift-item__title">{shift.name}</div>
-                      <div className="driver-shift-item__meta">
-                        <IconClock style={{ width: 11, height: 11, verticalAlign: -1, marginRight: 3 }} />
-                        {shift.startTime}–{shift.endTime}
-                        {isToday(date) && ' · Today'}
-                      </div>
-                    </div>
-                    <StatusPill tone="green">Assigned</StatusPill>
-                  </div>
-                ))}
-              </div>
-            );
-          })
+          <div className="driver-rota">
+            {days.map(([date, shifts]) => (
+              <DriverRotaDay key={date} date={date} shifts={shifts} isToday={date === today} />
+            ))}
+          </div>
         )}
       </Card>
     </div>

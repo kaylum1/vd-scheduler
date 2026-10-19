@@ -315,8 +315,89 @@ describe('mock state and scope', () => {
     expect(rota.shifts[0].availabilityByDriver['mock-gianni']).toBe('not_submitted');
   });
 
-  it('the driver-facing My Rota read is unchanged (empty in mock mode) and never returns manager data', async () => {
-    await repo.assignDriver({ shiftInstanceId: FUTURE_DINNER, driverId: 'mock-gianni', confirmAvailabilityOverride: true });
-    expect(await repo.listDriverVisibleAssignments('mock-gianni')).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// Live Driver My Rota: getDriverWeekRota (mock analogue of the driver-safe views)
+// ---------------------------------------------------------------------------
+
+describe('MockRotaRepository.getDriverWeekRota', () => {
+  const publish = (weekStart = FUTURE_WEEK, resortId = CRANS) =>
+    mockRotaPublications.push({ resortId, weekStart, publishedAt: '2030-01-01T00:00:00Z', unpublishedAt: null });
+  const myRota = (driverId = 'mock-gianni', weekStart = FUTURE_WEEK) => repo.getDriverWeekRota({ weekStart, driverId });
+
+  it('14. an unpublished week is not published and empty -- even when the driver IS assigned (draft assignments stay hidden)', async () => {
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    expect(await myRota()).toEqual({ weekStart: FUTURE_WEEK, isPublished: false, shifts: [] });
+  });
+
+  it('15. a published week with no own assignment is published with zero shifts', async () => {
+    publish();
+    expect(await myRota()).toEqual({ weekStart: FUTURE_WEEK, isPublished: true, shifts: [] });
+  });
+
+  it('16. a published week shows the driver\'s own assignment with name and HH:MM times', async () => {
+    publish();
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    expect(await myRota()).toEqual({
+      weekStart: FUTURE_WEEK,
+      isPublished: true,
+      shifts: [{ shiftInstanceId: FUTURE_DINNER, date: FUTURE_WEEK, shiftName: 'Dinner', startTime: '18:00', endTime: '21:30' }],
+    });
+  });
+
+  it('shows several shifts on the same day, and reflects a manager adding then removing one (no republish)', async () => {
+    mockShiftTypes.push({ id: 'mock-crans-lunch', resortId: CRANS, key: 'lunch', name: 'Lunch', sortOrder: 0, isActive: true });
+    mockShiftTemplates.push({
+      id: 'mock-crans-lunch-tpl', resortId: CRANS, shiftTypeId: 'mock-crans-lunch', weekday: 0,
+      startTime: '12:00', endTime: '14:00', requiredDrivers: 1, basePayChf: null, deliveryRateChf: null, isPremium: null,
+      effectiveFrom: '2024-01-01', effectiveTo: null, isActive: true, updatedAt: '2024-01-01T00:00:00.000Z',
+    });
+    publish();
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    expect((await myRota()).shifts.map((s) => s.shiftName)).toEqual(['Dinner']);
+
+    // Manager assigns the lunch on the already-published week, through the real mock write path.
+    await repo.assignDriver({ shiftInstanceId: `mock-crans-lunch-tpl-${FUTURE_WEEK}`, driverId: 'mock-gianni', confirmAvailabilityOverride: true });
+    expect((await myRota()).shifts.map((s) => s.shiftName)).toEqual(['Lunch', 'Dinner']);
+
+    await repo.unassignDriver({ shiftInstanceId: FUTURE_DINNER, driverId: 'mock-gianni' });
+    expect((await myRota()).shifts.map((s) => s.shiftName)).toEqual(['Lunch']);
+    expect((await myRota()).isPublished).toBe(true);
+  });
+
+  it('17. drivers are isolated: another driver\'s assignment never appears, and an unknown driver sees nothing', async () => {
+    publish();
+    seedAssignment(FUTURE_DINNER, 'mock-maria');
+    expect((await myRota('mock-gianni')).shifts).toEqual([]);
+    expect((await myRota('mock-maria')).shifts.map((s) => s.shiftInstanceId)).toEqual([FUTURE_DINNER]);
+    expect(await myRota('nobody')).toEqual({ weekStart: FUTURE_WEEK, isPublished: false, shifts: [] });
+  });
+
+  it('a retracted (unpublished) week is not published', async () => {
+    mockRotaPublications.push({ resortId: CRANS, weekStart: FUTURE_WEEK, publishedAt: '2030-01-01T00:00:00Z', unpublishedAt: '2030-01-02T00:00:00Z' });
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    expect((await myRota()).isPublished).toBe(false);
+  });
+
+  it('a published week of ANOTHER resort does not publish this driver\'s week', async () => {
+    publish(FUTURE_WEEK, 'mock-zermatt');
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    expect((await myRota()).isPublished).toBe(false);
+  });
+
+  it('18. repeated reads of the same week are stable and independent of other weeks', async () => {
+    publish();
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    const first = await myRota();
+    expect(await myRota()).toEqual(first);
+    expect(await myRota('mock-gianni', '2030-01-14')).toEqual({ weekStart: '2030-01-14', isPublished: false, shifts: [] });
+  });
+
+  it('exposes only driver-safe fields (no manager/colleague/source data)', async () => {
+    publish();
+    seedAssignment(FUTURE_DINNER, 'mock-gianni');
+    const json = JSON.stringify(await myRota());
+    expect(json).not.toMatch(/requiredDrivers|source|assignedAt|manual|mock-maria|availability/);
   });
 });

@@ -23,8 +23,8 @@ const manualRotaFiles: Record<string, string> = {
   'pages/manager/RotaAvailability.tsx': pageSource,
 };
 
-// Driver-facing pages, read as raw text: none may reach for the manager surface.
-const driverPages = import.meta.glob('../../pages/driver/*.tsx', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+// Driver-facing pages (not their tests, which legitimately name what must be absent), read as raw text: none may reach for the manager surface.
+const driverPages = import.meta.glob(['../../pages/driver/*.tsx', '!../../pages/driver/*.test.tsx'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 
 describe('Manual Rota import boundary', () => {
   it.each(Object.entries(manualRotaFiles))('%s never imports the Supabase client, generated DB types, or supabase-js', (_name, source) => {

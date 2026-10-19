@@ -76,16 +76,15 @@ Tests: [`StatusPill.test.ts`](../src/components/ui/StatusPill.test.ts),
 [`ManualRotaPanel.test.tsx`](../src/components/rota/ManualRotaPanel.test.tsx).
 
 **Known temporary inconsistency (not a bug to fix here):** the Manager
-**Dashboard** and the **Driver My Rota** page are still Stage 1.1's mock data
-(`src/mock-data/shifts.ts`), which fabricates a Dinner shift for every resort
-every day — including Verbier, which the *live* Configuration page and the
-*live* Manual Rota (Rota & Availability) correctly show has no shifts. So the
-Dashboard can show an uncovered Verbier Dinner while Manual Rota shows "No
-shifts are scheduled for this week." This is a mock/live data source
-mismatch, not a presentation-logic bug, and is **not** to be papered over by
-mixing real shifts into the mock pages. The Manager Rota itself is now live
-(sections J–L); Driver My Rota is planned to go live **before** any Publish
-UI is built, and the Dashboard in a later checkpoint.
+**Dashboard** is still Stage 1.1's mock data (`src/mock-data/shifts.ts`), which
+fabricates a Dinner shift for every resort every day — including Verbier, which
+the *live* Configuration page and the *live* Manual Rota (Rota & Availability)
+correctly show has no shifts. So the Dashboard can show an uncovered Verbier
+Dinner while Manual Rota shows "No shifts are scheduled for this week." This is
+a mock/live data source mismatch, not a presentation-logic bug, and is **not**
+to be papered over by mixing real shifts into the mock page. The Manager Rota
+(sections J–L) and Driver My Rota (section N) are now live; the Dashboard goes
+live in a later checkpoint.
 
 ---
 
@@ -903,9 +902,8 @@ their accessible name; the candidate list toggle exposes `aria-expanded`.
 assigned to overlapping shifts on the same day (section J); Remove has no
 confirmation step; the availability read (shifts × drivers rows) is not
 paginated and the API caps a response at `max_rows = 1000`, so it needs paging
-before any one resort-week could approach that (section K); and the Dashboard and Driver My Rota are
-still Stage 1.1 mock data, so a manager's real assignments are not yet visible
-to drivers (Live Driver My Rota is the next checkpoint, ahead of any Publish UI).
+before any one resort-week could approach that (section K); and the Dashboard is still Stage 1.1 mock data. (Driver My Rota, which was
+also mock when this was written, is now live — section N.)
 
 **Not part of this checkpoint:** Auto-Rota, Publish UI, Attendance UI, live
 Driver My Rota, live Dashboard.
@@ -914,3 +912,98 @@ Driver My Rota, live Dashboard.
 `pages/manager/RotaAvailability.test.tsx`,
 `components/availability/ManagerAvailabilityPanel.test.tsx`,
 `components/rota/manualRotaBoundary.test.ts`, `components/ui/Modal.test.tsx`.
+
+---
+
+## M. Driver-safe publication status (Live Driver My Rota, LD-A)
+
+**Implemented in the database only** (migration `20261019100000_driver_safe_publication_status.sql`).
+Driver My Rota (built in the next checkpoint, section N) needs to tell "this week is not published yet" apart from "this week
+is published and I have no shifts", which `driver_visible_assignments` alone
+cannot (both are zero rows).
+
+**Drivers read publication state from `driver_visible_week_publications`.** It
+returns one row per *currently published* week of the calling driver's *own*
+resort — exactly `resort_id` and `week_start`, nothing else. A row means
+published; no row means not published (draft, never published, or retracted).
+"Currently published" is the schema's one existing predicate
+(`published_at is not null and unpublished_at is null`) — no second publication
+model. It is an owner-executed (`security_invoker = false`) view like the other
+driver views and resolves the caller from the session
+(`current_app_user()`: auth user → app_users → driver); it has no driver or
+resort input, so nothing a client sends can widen it. `anon` cannot read it.
+
+**Direct driver access to `rota_publications` is no longer part of the supported
+privacy contract.** The driver SELECT policy was removed, so drivers get zero
+rows from the base table (it carried `published_by`, `generation_source` and the
+timestamps, which drivers have no need for). Managers are unchanged
+(`rota_publications_manager_all`). Driver Availability is unaffected: its lock
+comes from SECURITY DEFINER code (`week_availability_status`,
+`confirm_availability_week`, `reopen_availability_week`,
+`shift_instance_week_is_published`), none of which read the table as the driver.
+`driver_visible_assignments` is unchanged (own assignments, published weeks,
+active shifts); a manager's add/remove on a published week shows through it
+immediately, and un-publishing makes both views go empty.
+
+**Tests:** `supabase/tests/35_driver_safe_views.sql`.
+
+---
+
+## N. Live Driver My Rota
+
+**Implemented.** `pages/driver/MyRota.tsx` is the driver's read-only view of
+their OWN published rota for one operational week, replacing the Stage 1.1 mock
+page (fake current-week "Published" chip, fake "hours scheduled" badge, and a
+subtitle that was already blank against real data — all gone).
+
+**Data.** One repository method, `RotaRepository.getDriverWeekRota({ weekStart,
+driverId })`, returning `DriverWeekRota { weekStart, isPublished, shifts[] }`
+with `DriverRotaShift { shiftInstanceId, date, shiftName, startTime, endTime }`
+(`HH:MM`). It is built by one pure function shared by both providers
+(`repositories/driverRotaModel.ts`): shifts sorted by date, start time, name;
+an unpublished week is ALWAYS empty. The Supabase provider performs exactly two
+week-scoped reads in parallel — `driver_visible_week_publications` (a row means
+published) and `driver_visible_assignments` — and never reads
+`rota_assignments` or `rota_publications`. **Identity is the authenticated
+session:** both views resolve the driver themselves and have no driver column,
+and the adapter never sends `driverId` (it exists on the contract only because
+the mock provider has no session), so a client cannot request another driver's
+rota. The mock provider derives the same shape from its fixtures; it seeds **no**
+default published week (so normal mock development reads "not published yet",
+and Driver Availability is not unexpectedly locked) — tests publish explicitly.
+
+**Three situations, three messages** (plus a real chip: "Published" /
+"Not published", text not colour):
+- current or future week, not published — "Your rota for this week hasn’t been
+  published yet."
+- past week, not published — "No rota was published for this week."
+- published, no shifts for this driver — "You don’t have any shifts assigned
+  this week."
+- published with shifts — day sections (only days with shifts; several shifts on
+  one day are separate rows) with shift name and `HH:MM–HH:MM`, a "Today" tag,
+  and a simple "N shift(s)" count.
+
+**Weeks** use the app's Monday–Sunday operational week (Europe/Zurich) via the
+shared `WeekNav` and date helpers; navigation is unbounded, past published weeks
+stay viewable (read-only — there are no controls to act on), far-future weeks
+simply read as unpublished.
+
+**Freshness.** A manager may edit a published week after publication; the
+manager's and driver's sessions are separate, so the query
+(`driverRotaKeys.week(driverId, weekStart)`) is always stale (`staleTime: 0`) and
+refetches on mount, week change and window/tab focus. No polling and no
+realtime. An add or removal on a published week appears on the driver's next
+refetch with no republish. Cancelled shifts and unpublished weeks never appear
+(existing safe-view behaviour). A manager override is invisible to the driver —
+no availability, reason or warning is shown on My Rota; availability is its own
+page.
+
+**Not part of this checkpoint:** a Publish workflow (the real Publish UI/RPC
+does not exist yet; weeks were published directly in the database for
+verification only), Auto-Rota, Attendance, the live Dashboard, payroll.
+
+**Tests:** `repositories/driverRotaModel.test.ts`,
+`repositories/supabase/rota.test.ts` and `repositories/mock/rota.test.ts`
+(`getDriverWeekRota`), `pages/driver/MyRota.test.tsx`, and the import-boundary
+test in `components/rota/manualRotaBoundary.test.ts`.
+

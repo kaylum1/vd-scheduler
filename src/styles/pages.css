@@ -880,53 +880,68 @@
   margin-bottom: 16px;
 }
 
-.driver-shift-item {
+.driver-rota {
+  padding: 6px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.driver-rota__day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.driver-rota__day-title {
+  margin: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--border-default);
-}
-
-.driver-shift-item:last-child {
-  border-bottom: none;
-}
-
-.driver-shift-item__date {
-  width: 54px;
-  flex-shrink: 0;
-  text-align: center;
-}
-
-.driver-shift-item__date-day {
-  font-size: 17px;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11.5px;
   font-weight: 700;
-  color: var(--text-primary);
-  line-height: 1.1;
-}
-
-.driver-shift-item__date-weekday {
-  font-size: 10.5px;
-  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
 }
 
-.driver-shift-item__body {
-  flex: 1;
-  min-width: 0;
+.driver-rota__day-title span:not(.status-pill) {
+  font-weight: 600;
 }
 
-.driver-shift-item__title {
-  font-size: 13.5px;
+.driver-rota__shifts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.driver-rota__shift {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 14px;
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+}
+
+.driver-rota__shift-name {
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.driver-shift-item__meta {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  margin-top: 2px;
+.driver-rota__shift-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 /* ---------- Driver: Availability (one week at a time) ---------- */
@@ -1199,7 +1214,4 @@
     align-items: flex-start;
   }
 
-  .driver-shift-item {
-    padding: 12px 14px;
-  }
 }

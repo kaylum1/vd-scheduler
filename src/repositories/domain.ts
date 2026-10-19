@@ -205,6 +205,33 @@ export interface DriverVisibleAssignment {
   endTime: string;
 }
 
+/**
+ * One shift on a driver's own published rota (Live Driver My Rota). Deliberately
+ * the bare minimum a driver needs to turn up: which shift, when. No co-drivers,
+ * headcount, assignment source, manager identity, availability, pay or audit
+ * data exists on this type, and ManagerWeekRota is never reused for drivers.
+ * `startTime` / `endTime` are 'HH:MM'.
+ */
+export interface DriverRotaShift {
+  shiftInstanceId: string;
+  date: string;
+  shiftName: string;
+  startTime: string;
+  endTime: string;
+}
+
+/**
+ * The authenticated driver's rota for one operational (Monday-Sunday) week.
+ * `isPublished` is the resort's real publication state for that week, so a
+ * driver can tell "not published yet" from "published, nothing for me":
+ * unpublished is ALWAYS `shifts: []`. Sorted by date, start time, name.
+ */
+export interface DriverWeekRota {
+  weekStart: string;
+  isPublished: boolean;
+  shifts: DriverRotaShift[];
+}
+
 export type AvailabilityStatus = 'available' | 'unavailable';
 
 export interface AvailabilityAnswer {
