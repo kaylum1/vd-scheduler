@@ -123,6 +123,7 @@ export function buildManagerWeekRota(input: ManagerRotaBuildInput): ManagerWeekR
       shiftTypeId: shift.shiftTypeId,
       date: shift.date,
       name: shift.name,
+      sortOrder: shift.sortOrder,
       startTime: clock(shift.startTime),
       endTime: clock(shift.endTime),
       requiredDrivers: shift.requiredDrivers,

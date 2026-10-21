@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '../ui/Button';
 import { Card, CardHeader } from '../ui/Card';
+import { ConfirmDialog } from '../ui/Modal';
 import { EmptyState } from '../ui/EmptyState';
 import { InlineNotice } from '../ui/InlineNotice';
 import { IconCalendar } from '../ui/icons';
@@ -9,13 +10,14 @@ import { AssignDriverDialog, type AssignDialogState } from './AssignDriverDialog
 import { ManualRotaShiftCard, assignKey, removeKey } from './ManualRotaShiftCard';
 import { useManagerWeekRota } from './useManagerWeekRota';
 import { describeRotaError } from './rotaErrorMessages';
-import { formatDayLabel, parseISODate, toISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
+import { describeAutoRotaError, describeAutoRotaResult, getGenerateAvailability, hasPastShifts, type DescribedAutoRotaResult } from './autoRotaUi';
+import { formatDayLabel, formatWeekRangeLabel, parseISODate, toISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
 import { getShiftCoverage } from '../../lib/rotaCoverage';
 import { getRepositories } from '../../repositories';
 import { isAvailabilityOverrideRequired } from '../../repositories/errors';
 import { managerRotaKeys } from '../../repositories/queryKeys';
-import type { AssignDriverParams, ManagerRotaAssignment, ManagerRotaDriver, ManagerRotaShift, UnassignDriverParams } from '../../repositories/domain';
+import type { AssignDriverParams, GenerateAutoRotaParams, ManagerRotaAssignment, ManagerRotaDriver, ManagerRotaShift, UnassignDriverParams } from '../../repositories/domain';
 
 /** "Dinner (2P) — Monday 19 Oct, 18:00–21:30": enough for a manager to know exactly which shift a dialog is about. */
 function describeShift(shift: ManagerRotaShift): string {
@@ -37,8 +39,14 @@ function describeShift(shift: ManagerRotaShift): string {
  *
  * Display-only for publication: it shows whether the week is published but has
  * no publish/unpublish controls, and a published week stays fully editable.
+ *
+ * It also hosts Generate Rota (Auto-Rota), scoped to the selected resort + week:
+ * one confirmation, one repository call (the repository plans and applies it --
+ * nothing of that lives here), then the week is refetched so the ordinary Manual
+ * Rota below shows the real, server-side result. Generated assignments are just
+ * assignments: the manager edits them with the normal controls.
  */
-export function ManualRotaPanel({ resortId, weekStart }: { resortId: string | null; weekStart: string }) {
+export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId: string | null; weekStart: string; resortName?: string }) {
   const queryClient = useQueryClient();
   const rotaQuery = useManagerWeekRota(resortId, weekStart);
 
@@ -49,6 +57,23 @@ export function ManualRotaPanel({ resortId, weekStart }: { resortId: string | nu
   // (React flushes this before another click can land), which is what prevents a duplicate submit.
   const [inFlight, setInFlight] = useState<ReadonlySet<string>>(new Set());
   const dialogCounter = useRef(0);
+
+  // ---- Generate Rota (Auto-Rota) -------------------------------------
+  const selectionKey = `${resortId ?? ''}|${weekStart}`;
+  const selectionRef = useRef(selectionKey);
+  selectionRef.current = selectionKey;
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateNotice, setGenerateNotice] = useState<({ tone: DescribedAutoRotaResult['tone'] | 'error'; text: string }) | null>(null);
+  const [generatingKey, setGeneratingKey] = useState<string | null>(null);
+  const generating = generatingKey === selectionKey;
+  const generateMutation = useMutation({ mutationFn: (params: GenerateAutoRotaParams) => getRepositories().rota.generateAutoRota(params) });
+
+  // A result or error belongs to the resort + week it was produced for: changing either clears it and closes the dialog,
+  // so a confirmation can never submit against a selection that is no longer on screen.
+  useEffect(() => {
+    setGenerateOpen(false);
+    setGenerateNotice(null);
+  }, [resortId, weekStart]);
 
   const assignMutation = useMutation({ mutationFn: (params: AssignDriverParams) => getRepositories().rota.assignDriver(params) });
   const unassignMutation = useMutation({ mutationFn: (params: UnassignDriverParams) => getRepositories().rota.unassignDriver(params) });
@@ -146,6 +171,38 @@ export function ManualRotaPanel({ resortId, weekStart }: { resortId: string | nu
     });
   };
 
+  // Stable identity (the Modal re-focuses its panel whenever onClose changes); ignored while a run is in flight.
+  const cancelGenerate = useCallback(() => {
+    if (!generating) setGenerateOpen(false);
+  }, [generating]);
+
+  const handleGenerate = async () => {
+    if (!resortId || generating) return;
+    const key = selectionKey;
+    const params: GenerateAutoRotaParams = { resortId, weekStart };
+    const weekKey = managerRotaKeys.week(resortId, weekStart);
+    setGeneratingKey(key);
+    setGenerateNotice(null);
+    try {
+      const result = await generateMutation.mutateAsync(params);
+      // The server/read model stays authoritative: refetch, never fabricate rows here.
+      await queryClient.invalidateQueries({ queryKey: weekKey });
+      if (selectionRef.current === key) {
+        setGenerateOpen(false);
+        setGenerateNotice(describeAutoRotaResult(result));
+      }
+    } catch (error) {
+      const described = describeAutoRotaError(error);
+      if (described.shouldRefresh) await queryClient.invalidateQueries({ queryKey: weekKey });
+      if (selectionRef.current === key) {
+        setGenerateOpen(false);
+        setGenerateNotice({ tone: 'error', text: described.message });
+      }
+    } finally {
+      setGeneratingKey((current) => (current === key ? null : current));
+    }
+  };
+
   const closeDialog = useCallback(() => {
     setDialog(null);
     setDialogError(null);
@@ -166,11 +223,35 @@ export function ManualRotaPanel({ resortId, weekStart }: { resortId: string | nu
   }, [rotaQuery.data]);
 
   const rota = rotaQuery.data;
+  const generateAvailability = getGenerateAvailability(rota, today);
+  const generateReasonId = 'manual-rota-generate-reason';
   const dialogBusy = dialog ? inFlight.has(assignKey(dialog.shiftInstanceId, dialog.driverId)) : false;
 
   return (
     <Card style={{ marginBottom: 16 }}>
-      <CardHeader title="Manual Rota" />
+      <CardHeader
+        title="Manual Rota"
+        action={
+          resortId ? (
+            <Button
+              variant="primary"
+              size="sm"
+              className="manual-rota__generate"
+              disabled={!generateAvailability.enabled || generating}
+              aria-describedby={generateAvailability.reason ? generateReasonId : undefined}
+              aria-busy={generating || undefined}
+              onClick={() => setGenerateOpen(true)}
+            >
+              {generating ? 'Generating…' : 'Generate Rota'}
+            </Button>
+          ) : undefined
+        }
+      />
+      {resortId && generateAvailability.reason && (
+        <p id={generateReasonId} className="manual-rota__generate-reason">
+          {generateAvailability.reason}
+        </p>
+      )}
       <div className="manual-rota">
         {!resortId ? (
           <EmptyState icon={<IconCalendar />} title="Choose a resort to see its rota." />
@@ -189,6 +270,11 @@ export function ManualRotaPanel({ resortId, weekStart }: { resortId: string | nu
           <>
             {rota.isPublished && (
               <InlineNotice tone="info">This rota is published. Manager assignment changes are visible immediately.</InlineNotice>
+            )}
+            {generateNotice && (
+              <InlineNotice tone={generateNotice.tone} onDismiss={() => setGenerateNotice(null)}>
+                {generateNotice.text}
+              </InlineNotice>
             )}
             {actionError && (
               <InlineNotice tone="error" onDismiss={() => setActionError(null)}>
@@ -226,6 +312,32 @@ export function ManualRotaPanel({ resortId, weekStart }: { resortId: string | nu
           </>
         )}
       </div>
+
+      {generateOpen && resortId && (
+        <ConfirmDialog
+          title="Generate rota?"
+          confirmLabel="Generate Rota"
+          busyLabel="Generating…"
+          busy={generating}
+          onConfirm={() => void handleGenerate()}
+          onCancel={cancelGenerate}
+          message={
+            <div className="generate-dialog">
+              <p className="generate-dialog__scope">
+                {resortName ? <strong>{resortName}</strong> : <strong>This resort</strong>}
+                <span>{formatWeekRangeLabel(parseISODate(weekStart))}</span>
+              </p>
+              <p>Auto-Rota will:</p>
+              <ul>
+                <li>Keep all existing assignments</li>
+                <li>Only use drivers marked Available</li>
+                <li>Fill open positions using the rota fairness rules</li>
+              </ul>
+              {hasPastShifts(rota, today) && <p className="generate-dialog__note">Past shifts will not be changed.</p>}
+            </div>
+          }
+        />
+      )}
 
       {dialog && (
         <AssignDriverDialog key={dialog.key} dialog={dialog} busy={dialogBusy} error={dialogError} onConfirm={handleConfirm} onCancel={closeDialog} />

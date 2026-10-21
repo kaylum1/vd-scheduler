@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AutoRotaError,
   AvailabilityOverrideRequiredError,
   RepositoryError,
   RotaAssignmentError,
@@ -7,7 +8,7 @@ import {
   isRotaAssignmentError,
   type PostgrestLikeError,
 } from '../errors';
-import { mapRotaRpcError } from './rotaErrors';
+import { mapAutoRotaRpcError, mapRotaRpcError } from './rotaErrors';
 
 const err = (code: string, details: string | null, message = 'db message'): PostgrestLikeError => ({ code, details, hint: null, message });
 
@@ -106,5 +107,38 @@ describe('mapRotaRpcError: everything else stays generic and never leaks databas
     expect(e).toBeInstanceOf(RepositoryError);
     expect(e.userMessage).toBe('Something went wrong. Please try again.');
     expect(e.userMessage).not.toMatch(/rota_assignments|exploded/);
+  });
+});
+
+describe('mapAutoRotaRpcError (apply_auto_rota contract)', () => {
+  it.each([
+    ['VD002', 'stale_plan', 'stale_plan'],
+    ['55006', 'published_week', 'published_week'],
+    ['55006', 'historical_week', 'historical_week'],
+    ['55006', 'historical_shift', 'historical_shift'],
+    ['42501', null, 'permission_denied'],
+    ['P0002', null, 'resort_not_found'],
+    ['22023', null, 'invalid_week'],
+    ['22023', 'plan_malformed', 'invalid_plan'],
+    ['22023', 'plan_shift_not_in_week', 'invalid_plan'],
+    ['22023', 'plan_driver_not_in_resort', 'invalid_plan'],
+    // Unrecognised combinations are never mistaken for a known state.
+    ['VD002', 'other', 'unknown'],
+    ['VD002', null, 'unknown'],
+    ['55006', 'attendance_recorded', 'unknown'],
+    ['55006', null, 'unknown'],
+    ['XX000', null, 'unknown'],
+  ] as const)('%s / %s -> %s', (code, detail, kind) => {
+    const mapped = mapAutoRotaRpcError('rota.generateAutoRota', err(code, detail));
+    expect(mapped).toBeInstanceOf(AutoRotaError);
+    expect(mapped.kind).toBe(kind);
+    expect(mapped.code).toBe(code);
+    // The manager-facing text is first-party: no SQLSTATE, DETAIL token or database wording.
+    expect(mapped.userMessage).not.toMatch(/VD002|55006|42501|P0002|22023|XX000|stale_plan|plan_malformed|db message/);
+  });
+
+  it('keeps the original error as the (log-only) cause', () => {
+    const original = err('VD002', 'stale_plan');
+    expect(mapAutoRotaRpcError('rota.generateAutoRota', original).cause).toBe(original);
   });
 });

@@ -500,6 +500,8 @@ export interface ManagerRotaShift {
   /** ISO date, YYYY-MM-DD. */
   date: string;
   name: string;
+  /** The Shift's display order within a day. Part of the canonical shift order (date, sortOrder, startTime, name, id) the Auto-Rota planner uses for ties. */
+  sortOrder: number;
   /** Wall-clock 'HH:MM' (seconds stripped so both providers agree). Never round-trip through a Date -- see lib/operationalTime.ts. */
   startTime: string;
   endTime: string;
@@ -556,4 +558,56 @@ export interface UnassignDriverParams {
 
 export interface UnassignDriverResult {
   assignmentId: string;
+}
+
+// ---------------------------------------------------------------------
+// Auto-Rota (AR-B). The planner (lib/autoRotaPlanner.ts) PROPOSES; the
+// database (apply_auto_rota, AR-A) decides whether every proposal is still
+// safe. React only ever sees AutoRotaResult and AutoRotaError.
+// ---------------------------------------------------------------------
+
+/** One proposed assignment. The only thing ever sent to the database for a plan. */
+export interface AutoRotaPlannedAssignment {
+  shiftInstanceId: string;
+  driverId: string;
+}
+
+/**
+ * The pure planner's output: PLANNING numbers only (what the planner would do
+ * given the week it was shown). Never shown to the manager as the outcome --
+ * the authoritative AutoRotaResult comes from the database after the apply.
+ */
+export interface AutoRotaPlan {
+  resortId: string;
+  weekStart: string;
+  /** Deterministic order: weekend bucket then weekday bucket, scarcity-first within a bucket, slot by slot. */
+  assignments: AutoRotaPlannedAssignment[];
+  plannedAssignmentCount: number;
+  /** Open slots (today/future shifts) the plan could not fill. */
+  remainingOpenSlots: number;
+  /** Today/future shifts that stay under-covered after the plan, in canonical shift order. */
+  uncoveredShiftIds: string[];
+  /** Active shifts dated before the operational today: skipped, never planned, never reported as gaps. */
+  skippedPastShiftCount: number;
+  /** True when the entire Monday-Sunday week is before the operational today (nothing can be generated; the database reports historical_week). */
+  weekIsHistorical: boolean;
+}
+
+export interface GenerateAutoRotaParams {
+  resortId: string;
+  weekStart: string;
+}
+
+/** The AUTHORITATIVE outcome of one generation, computed by the database after the apply. Partial coverage is a normal success. */
+export interface AutoRotaResult {
+  resortId: string;
+  weekStart: string;
+  /** Rows actually created by this run. */
+  assignedCount: number;
+  /** Positions still open on today/future shifts after the run (> 0 is not a failure). */
+  remainingOpenSlots: number;
+  uncoveredShiftIds: string[];
+  skippedPastShiftCount: number;
+  /** Groups this run's audit rows. */
+  runId: string;
 }

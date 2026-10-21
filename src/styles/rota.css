@@ -403,3 +403,58 @@
     min-width: 88px;
   }
 }
+
+/* ---------- Generate Rota (Auto-Rota) ---------- */
+.manual-rota__generate {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.manual-rota__generate-reason {
+  margin: 0;
+  padding: 8px 18px 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.generate-dialog p {
+  margin: 0 0 8px;
+}
+
+.generate-dialog__scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.generate-dialog__scope span {
+  color: var(--text-secondary);
+}
+
+.generate-dialog ul {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  list-style: disc;
+}
+
+.generate-dialog li {
+  margin-bottom: 4px;
+}
+
+.generate-dialog__note {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+@media (max-width: 480px) {
+  .manual-rota__generate {
+    min-height: 40px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .manual-rota__generate-reason {
+    padding: 8px 12px 0;
+  }
+}

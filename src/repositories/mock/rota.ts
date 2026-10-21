@@ -2,6 +2,9 @@ import type { RotaRepository } from '../types';
 import type {
   AssignDriverParams,
   AssignDriverResult,
+  AutoRotaPlan,
+  AutoRotaResult,
+  GenerateAutoRotaParams,
   DriverVisibleAssignment,
   DriverWeekRota,
   ManagerWeekRota,
@@ -10,12 +13,14 @@ import type {
   UnassignDriverParams,
   UnassignDriverResult,
 } from '../domain';
-import { AvailabilityOverrideRequiredError, RotaAssignmentError } from '../errors';
+import { AutoRotaError, AvailabilityOverrideRequiredError, RotaAssignmentError } from '../errors';
+import { runAutoRota } from '../autoRotaOrchestration';
+import { summarizeOpenCoverage } from '../../lib/autoRotaPlanner';
 import { buildDriverWeekRota } from '../driverRotaModel';
 import { buildManagerWeekRota } from '../managerRotaModel';
 import { parseISODate, startOfWeek, toISODate } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
-import { mockAvailability, mockDrivers, mockRotaAssignments, mockShiftTemplates, nextMockRotaAssignmentId } from './fixtures';
+import { mockAvailability, mockDrivers, mockResorts, mockRotaAssignments, mockShiftTemplates, nextMockRotaAssignmentId } from './fixtures';
 import { isMockWeekPublished } from './availability';
 import { generateMockShiftInstancesForWeek } from './shiftInstances';
 
@@ -27,6 +32,14 @@ import { generateMockShiftInstancesForWeek } from './shiftInstances';
  * assign_driver / unassign_driver (supabase/migrations/20261009100100_*) --
  * but it is a mock, so a few things are deliberately different:
  *
+ *  - AUTO-ROTA (generateAutoRota) uses the SAME planner and the SAME retry
+ *    orchestration as the Supabase provider, then applies the proposed rows to the
+ *    mock assignment state (source 'auto', additive, never touching existing rows).
+ *    It enforces the obvious rules -- a published week and a wholly past week are
+ *    refused with the same typed AutoRotaError -- but, being a mock, it has no
+ *    transaction, no week lock, no real concurrency (so the stale-plan path is
+ *    never taken) and no SQLSTATEs. Concurrency safety is the database's, tested
+ *    in supabase/tests/86_auto_rota.sql.
  *  - NO ATTENDANCE. The mock domain has no attendance state, so the "attendance
  *    blocks unassign" guard is not reproduced. The real database stays
  *    authoritative for it (DB-tested); do not rely on the mock to exercise it.
@@ -80,6 +93,8 @@ function findMockShiftInstance(shiftInstanceId: string): ShiftInstanceRecord | n
   }
   return null;
 }
+
+let mockAutoRotaRunSeq = 0;
 
 export class MockRotaRepository implements RotaRepository {
   /**
@@ -194,5 +209,51 @@ export class MockRotaRepository implements RotaRepository {
 
     const [removed] = mockRotaAssignments.splice(index, 1);
     return { assignmentId: removed.id };
+  }
+
+  async generateAutoRota(params: GenerateAutoRotaParams): Promise<AutoRotaResult> {
+    return runAutoRota({
+      readWeek: () => this.getManagerWeekRota(params),
+      applyPlan: (plan) => this.applyAutoRotaPlan(plan),
+      operationalToday: () => toISODate(getOperationalToday()),
+    });
+  }
+
+  private async applyAutoRotaPlan(plan: AutoRotaPlan): Promise<AutoRotaResult> {
+    const operation = 'rota.generateAutoRota';
+    if (!mockResorts.some((r) => r.id === plan.resortId)) throw new AutoRotaError('resort_not_found', { operation });
+    if (startOfWeek(parseISODate(plan.weekStart)).getTime() !== parseISODate(plan.weekStart).getTime()) throw new AutoRotaError('invalid_week', { operation });
+    if (isMockWeekPublished(plan.resortId, plan.weekStart)) throw new AutoRotaError('published_week', { operation });
+    if (plan.weekIsHistorical) throw new AutoRotaError('historical_week', { operation });
+
+    const assignedAt = new Date().toISOString();
+    let assignedCount = 0;
+    for (const proposed of plan.assignments) {
+      // Defensive only (the planner never proposes these): never duplicate a driver on a shift.
+      if (mockRotaAssignments.some((a) => a.shiftInstanceId === proposed.shiftInstanceId && a.driverId === proposed.driverId)) continue;
+      mockRotaAssignments.push({
+        id: nextMockRotaAssignmentId(),
+        shiftInstanceId: proposed.shiftInstanceId,
+        driverId: proposed.driverId,
+        resortId: plan.resortId,
+        source: 'auto',
+        assignedAt,
+      });
+      assignedCount += 1;
+    }
+
+    // The result is computed from the state AFTER the apply, like the database does -- not from the plan's own numbers.
+    const week = await this.getManagerWeekRota({ resortId: plan.resortId, weekStart: plan.weekStart });
+    const coverage = summarizeOpenCoverage(week, toISODate(getOperationalToday()));
+    mockAutoRotaRunSeq += 1;
+    return {
+      resortId: plan.resortId,
+      weekStart: plan.weekStart,
+      assignedCount,
+      remainingOpenSlots: coverage.remainingOpenSlots,
+      uncoveredShiftIds: coverage.uncoveredShiftIds,
+      skippedPastShiftCount: coverage.skippedPastShiftCount,
+      runId: `mock-auto-rota-run-${mockAutoRotaRunSeq}`,
+    };
   }
 }

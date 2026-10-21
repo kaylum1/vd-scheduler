@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../types/database.generated';
 import { SupabaseRotaRepository } from './rota';
-import { RepositoryError, isAvailabilityOverrideRequired, isRotaAssignmentError } from '../errors';
+import { AutoRotaError, RepositoryError, isAutoRotaError, isAvailabilityOverrideRequired, isRotaAssignmentError } from '../errors';
 // Raw source text -- used only by the architecture check proving this adapter
 // never writes rota_assignments directly.
 import rotaAdapterSource from './rota.ts?raw';
@@ -23,7 +23,10 @@ interface RecordedQuery {
  * Records every call so tests can assert query counts, scoping, and -- most
  * importantly -- that nothing is ever written.
  */
-function createFakeClient(tables: Record<string, Row[]>, rpcResults: Record<string, { data: unknown; error: unknown }> = {}) {
+type RpcResult = { data: unknown; error: unknown };
+type RpcResponder = RpcResult | ((args: Record<string, unknown>, callNumber: number) => RpcResult);
+
+function createFakeClient(tables: Record<string, Row[]>, rpcResults: Record<string, RpcResponder> = {}) {
   const queries: RecordedQuery[] = [];
   const writes: string[] = [];
   const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
@@ -68,7 +71,9 @@ function createFakeClient(tables: Record<string, Row[]>, rpcResults: Record<stri
     },
     rpc(fn: string, args: Record<string, unknown>) {
       rpcCalls.push({ fn, args });
-      return Promise.resolve(rpcResults[fn] ?? { data: [], error: null });
+      const responder = rpcResults[fn];
+      const result = typeof responder === 'function' ? responder(args, rpcCalls.filter((c) => c.fn === fn).length) : responder;
+      return Promise.resolve(result ?? { data: [], error: null });
     },
   };
 
@@ -494,5 +499,178 @@ describe('SupabaseRotaRepository.getDriverWeekRota', () => {
       },
     } as unknown as SupabaseClient<Database>;
     await expect(new SupabaseRotaRepository(client).getDriverWeekRota({ weekStart: DRIVER_WEEK, driverId: 'd-me' })).rejects.toBeInstanceOf(RepositoryError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-Rota: generateAutoRota (read -> pure plan -> ONE apply_auto_rota call)
+// ---------------------------------------------------------------------------
+
+/**
+ * A realistic week (2030-01-07..13, far in the future so nothing is historical):
+ * Friday needs 2 and already has Alex (active) plus an inactive assignee; Monday
+ * is full. Gianni and Tomas are both Available on Friday, so the planner must
+ * propose exactly ONE more driver -- Gianni (fewer total assignments than Tomas,
+ * who already works Monday).
+ */
+function autoRotaTables(): Record<string, Row[]> {
+  const tables = standardTables();
+  tables.availability = [
+    ...tables.availability,
+    { shift_instance_id: 'si-fri', driver_id: 'd-gianni', resort_id: RESORT, status: 'available' },
+    { shift_instance_id: 'si-fri', driver_id: 'd-tomas', resort_id: RESORT, status: 'available' },
+  ];
+  return tables;
+}
+
+const dbResult = (over: Row = {}) => ({
+  data: [{ resort_id: RESORT, week_start: WEEK, assigned_count: 7, remaining_open_slots: 3, uncovered_shift_ids: ['si-x'], skipped_past_shift_count: 2, run_id: 'run-123', ...over }],
+  error: null,
+});
+const dbError = (code: string, details: string | null = null) => ({ data: null, error: { message: `db message for ${code}`, code, details } });
+const GENERATE = { resortId: RESORT, weekStart: WEEK };
+
+describe('SupabaseRotaRepository.generateAutoRota', () => {
+  it('reads the week FRESH, plans, and makes exactly ONE apply_auto_rota call carrying only the minimal plan', async () => {
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: dbResult() });
+    await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE);
+
+    expect(fake.rpcCalls).toHaveLength(1);
+    expect(fake.rpcCalls[0].fn).toBe('apply_auto_rota');
+    expect(fake.rpcCalls[0].args).toEqual({
+      p_resort_id: RESORT,
+      p_week_start: WEEK,
+      p_plan: [{ shift_instance_id: 'si-fri', driver_id: 'd-gianni' }],
+    });
+    // The week was read (shifts, drivers, publication, assignments, availability) before planning.
+    expect(fake.queries.map((q) => q.table)).toEqual(expect.arrayContaining(['shift_instances', 'drivers', 'rota_assignments', 'availability']));
+  });
+
+  it('sends nothing but the shift/driver pair -- no counts, availability, source, coverage or fairness metadata', async () => {
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: dbResult() });
+    await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE);
+    const plan = fake.rpcCalls[0].args.p_plan as Array<Record<string, unknown>>;
+    for (const row of plan) expect(Object.keys(row).sort()).toEqual(['driver_id', 'shift_instance_id']);
+    expect(Object.keys(fake.rpcCalls[0].args).sort()).toEqual(['p_plan', 'p_resort_id', 'p_week_start']);
+  });
+
+  it('returns the DATABASE\'s authoritative result mapped to camelCase -- never the planner\'s own numbers', async () => {
+    // The planner would report 1 planned assignment and 0 remaining; the database says otherwise.
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: dbResult() });
+    const result = await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE);
+    expect(result).toEqual({
+      resortId: RESORT,
+      weekStart: WEEK,
+      assignedCount: 7,
+      remainingOpenSlots: 3,
+      uncoveredShiftIds: ['si-x'],
+      skippedPastShiftCount: 2,
+      runId: 'run-123',
+    });
+  });
+
+  it('partial coverage is a normal success (remainingOpenSlots > 0), and an already-covered week sends an EMPTY plan and succeeds', async () => {
+    const covered = createFakeClient(standardTables(), { apply_auto_rota: dbResult({ assigned_count: 0, remaining_open_slots: 0, uncovered_shift_ids: [] }) });
+    const result = await new SupabaseRotaRepository(covered.client).generateAutoRota(GENERATE);
+    expect(covered.rpcCalls[0].args.p_plan).toEqual([]); // standard fixture has no eligible Available driver for the open Friday slot
+    expect(result.assignedCount).toBe(0);
+    expect(result.remainingOpenSlots).toBe(0);
+  });
+
+  it('STALE plan: discards it, re-reads the week, re-plans FROM SCRATCH, and retries exactly once', async () => {
+    const tables = autoRotaTables();
+    const fake = createFakeClient(tables, {
+      apply_auto_rota: (_args, call) => {
+        if (call === 1) {
+          // The world moves between read and apply: Gianni flips to Unavailable.
+          for (const row of tables.availability) if (row.driver_id === 'd-gianni' && row.shift_instance_id === 'si-fri') row.status = 'unavailable';
+          return dbError('VD002', 'stale_plan');
+        }
+        return dbResult();
+      },
+    });
+    const result = await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE);
+
+    expect(fake.rpcCalls).toHaveLength(2);
+    expect(fake.rpcCalls[0].args.p_plan).toEqual([{ shift_instance_id: 'si-fri', driver_id: 'd-gianni' }]);
+    expect(fake.rpcCalls[1].args.p_plan).toEqual([{ shift_instance_id: 'si-fri', driver_id: 'd-tomas' }]); // re-planned on FRESH data
+    expect(fake.queries.filter((q) => q.table === 'shift_instances')).toHaveLength(2); // two independent reads
+    expect(result.runId).toBe('run-123');
+  });
+
+  it('a SECOND stale plan surfaces the typed error -- no third attempt, no loop', async () => {
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: () => dbError('VD002', 'stale_plan') });
+    const error = await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE).catch((e) => e);
+    expect(error).toBeInstanceOf(AutoRotaError);
+    expect(isAutoRotaError(error, 'stale_plan')).toBe(true);
+    expect(fake.rpcCalls).toHaveLength(2);
+  });
+
+  it('a historical_shift from the database (the operational day crossed midnight) is re-read and re-planned exactly once', async () => {
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: (_a, call) => (call === 1 ? dbError('55006', 'historical_shift') : dbResult()) });
+    const result = await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE);
+    expect(fake.rpcCalls).toHaveLength(2);
+    expect(result.assignedCount).toBe(7);
+
+    const twice = createFakeClient(autoRotaTables(), { apply_auto_rota: () => dbError('55006', 'historical_shift') });
+    const error = await new SupabaseRotaRepository(twice.client).generateAutoRota(GENERATE).catch((e) => e);
+    expect(isAutoRotaError(error, 'historical_shift')).toBe(true);
+    expect(twice.rpcCalls).toHaveLength(2);
+  });
+
+  it.each([
+    ['published_week', '55006', 'published_week'],
+    ['historical_week', '55006', 'historical_week'],
+    ['permission_denied', '42501', null],
+    ['resort_not_found', 'P0002', null],
+    ['invalid_plan', '22023', 'plan_malformed'],
+    ['invalid_week', '22023', null],
+    ['unknown', 'XX000', null],
+  ] as const)('%s is surfaced immediately as a typed error and is NEVER retried (one apply call)', async (kind, code, detail) => {
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: () => dbError(code, detail) });
+    const error = await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE).catch((e) => e);
+    expect(isAutoRotaError(error, kind)).toBe(true);
+    expect(fake.rpcCalls).toHaveLength(1);
+    // A manager never sees SQLSTATEs, DETAIL tokens or database text.
+    expect((error as AutoRotaError).userMessage).not.toMatch(/VD002|55006|42501|P0002|22023|stale_plan|published_week|db message/);
+  });
+
+  it('an unexpected DETAIL on a known SQLSTATE is NOT mistaken for a known state', async () => {
+    for (const [code, detail] of [['VD002', 'something_else'], ['55006', 'mystery']] as const) {
+      const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: () => dbError(code, detail) });
+      const error = await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE).catch((e) => e);
+      expect(isAutoRotaError(error, 'unknown')).toBe(true);
+      expect(fake.rpcCalls).toHaveLength(1);
+    }
+  });
+
+  it('a wholly past week still goes to the database with an empty plan, so the DATABASE\'s historical_week verdict is the authoritative one', async () => {
+    const tables = standardTables();
+    for (const row of tables.shift_instances) {
+      row.date = '2020-01-08';
+      row.week_start = '2020-01-06';
+    }
+    const fake = createFakeClient(tables, { apply_auto_rota: () => dbError('55006', 'historical_week') });
+    const error = await new SupabaseRotaRepository(fake.client).generateAutoRota({ resortId: RESORT, weekStart: '2020-01-06' }).catch((e) => e);
+    expect(isAutoRotaError(error, 'historical_week')).toBe(true);
+    expect(fake.rpcCalls).toHaveLength(1);
+    expect(fake.rpcCalls[0].args.p_plan).toEqual([]);
+  });
+
+  it('an apply that returns no row is a RepositoryError, not a fabricated result', async () => {
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: { data: [], error: null } });
+    await expect(new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE)).rejects.toBeInstanceOf(RepositoryError);
+  });
+
+  it('never writes a table, never calls assign_driver, and never calls apply_auto_rota more than twice', async () => {
+    const fake = createFakeClient(autoRotaTables(), { apply_auto_rota: () => dbError('VD002', 'stale_plan') });
+    await new SupabaseRotaRepository(fake.client).generateAutoRota(GENERATE).catch(() => undefined);
+    expect(fake.writes).toEqual([]);
+    expect(fake.rpcCalls.every((c) => c.fn === 'apply_auto_rota')).toBe(true);
+    expect(fake.rpcCalls.length).toBeLessThanOrEqual(2);
+    // Structural: exactly one apply_auto_rota call site, and the Auto-Rota code never reaches for the manual write RPCs.
+    expect(rotaAdapterSource.match(/rpc\(\s*'apply_auto_rota'/g)).toHaveLength(1);
+    const autoRotaSection = rotaAdapterSource.slice(rotaAdapterSource.indexOf('async generateAutoRota'));
+    expect(autoRotaSection).not.toMatch(/assign_driver|unassign_driver|\.insert\(|\.update\(|\.delete\(|\.upsert\(|rota_assignments/);
   });
 });
