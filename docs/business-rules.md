@@ -1549,11 +1549,11 @@ Rota, `55006` + `check_in_recorded` on unassign.
 manager), any lateness display or policy, check-out, a manager correction of a check-in,
 location evidence, notifications, payroll calculation.
 
-## V. Attendance and Driver Check-in — repository, errors, mock and read models (AT-B) — NO UI yet
+## V. Attendance and Driver Check-in — repository, errors, mock and read models (AT-B)
 
-**Status: the application contracts exist (AT-B); there is NO Check-in button / timer and
-NO manager Attendance or Check-in UI yet (AT-C1 driver, AT-C2 manager), and neither
-feature is complete.** No database change: AT-B only exposes the AT-A / AT-A2 contracts.
+**Status: the application contracts exist (AT-B). The driver Check in control now exists
+(AT-C1, section W); there is still NO manager Attendance or Check-in evidence UI (AT-C2), and
+neither feature is complete.** No database change: AT-B only exposes the AT-A / AT-A2 contracts.
 
 **Repository (`RotaRepository`, both providers).**
 - `recordAttendance({ assignmentId, status, reason? }) → AttendanceMutationResult
@@ -1608,10 +1608,62 @@ to scheduled-end window in the resort timezone, mock-only arithmetic in
 check-in is returned before the window and attendance gates) and the unassign guard
 (attendance → `attendance_recorded`, else a check-in → `check_in_recorded`). The mock has no
 session, so `checkInToShift` reads the acting driver from `mock/session.ts`
-(`setMockActingDriver`); **the Driver Check-in UI (AT-C1) must set it from the mock identity
-bridge.** Mock shift instances are never cancelled unless a test marks the id in
+(`setMockActingDriver`), which the mock-mode `MockActingDriverBridge` (AT-C1) sets from the
+Manager/Driver switcher. Mock shift instances are never cancelled unless a test marks the id in
 `mockCancelledShiftInstanceIds`.
 
-**Not built:** the Check in button and window states (AT-C1), the manager Attendance /
-Check-in evidence UI and dialogs (AT-C2), end-to-end verification and the HANDOFF rewrite
-(AT-D), payroll calculation.
+**Not built here:** the manager Attendance / Check-in evidence UI and dialogs (AT-C2),
+end-to-end verification and the HANDOFF rewrite (AT-D), payroll calculation.
+
+---
+
+## W. Driver My Rota — Check in (AT-C1)
+
+**Status: the DRIVER Check in experience is implemented (AT-C1). The manager Attendance
+UI and the manager Check-in evidence UI are NOT implemented (AT-C2), so Attendance /
+Check-in is NOT a complete feature; end-to-end verification and the HANDOFF rewrite are
+AT-D. No payroll, GPS, check-out or lateness exists.** No database change.
+
+**Where.** Each of the driver's OWN Published shifts on Driver → My Rota shows one of:
+- *window not open yet* (opens within 24 hours): "Check-in opens at HH:MM", no button.
+  A window further away shows nothing.
+- *window open* (inclusive at both ends): a primary **Check in** button. One tap, no
+  confirmation dialog.
+- *checked in*: "Checked in at HH:MM" — the SERVER's instant — and no button again.
+- *window closed with no check-in*: "Check-in window closed". There is no retrospective
+  check-in; a driver cannot fix a missed window (the manager records the Attendance).
+
+**Authority.** The window instants come from the database (`checkInOpensAt` /
+`checkInClosesAt`) and the device clock only chooses which state to DISPLAY
+(`components/driver-rota/driverCheckInUi.ts`): React never builds the window (no timezone,
+no "30 minutes", no shift times) and never validates. `check_in_to_shift` decides, so a
+wrong device clock can only show the wrong control, never allow or deny a check-in. A
+server rejection beats the device clock for display (`check_in_closed` → "Check-in window
+closed", `check_in_too_early` → the opening time for a few seconds, cancelled / unpublished /
+attendance-recorded → the control disappears) and refetches the week. Times are shown in
+the resort's operational timezone (Europe/Zurich), never the device timezone.
+
+**Call.** `RotaRepository.checkInToShift({ assignmentId })` only — no driver id, time,
+resort or week. `created: false` (a repeat) is a normal success showing the ORIGINAL time.
+Only `driverRotaKeys.week` is invalidated. Per-shift state (pending "Checking in…" with
+`aria-busy`, per-shift `role="alert"` with the repository's `userMessage`, never DB
+detail) is keyed by assignment so Lunch and Dinner are independent, double submit is
+blocked by a ref guard, and the state is discarded when the week or driver changes (a late
+result for another week is dropped from the UI).
+
+**Clock.** ONE page-level timer (`useCheckInClock`): wakes at the next window edge and at
+least once a minute, and re-reads the clock on window focus / tab visible. It never polls
+the server (the rota query already refetches on focus).
+
+**Privacy / meaning.** Check-in is evidence that the signed-in driver tapped the control
+at the server's time. It is NOT Attendance and proves no location: the driver sees no
+Attendance, no other driver, no GPS / location claim, no lateness ("late" / "on time"),
+no pay. Wording is "Check in" / "Checked in", never "arrived" or "present".
+
+**Mock.** `MockActingDriverBridge` (mounted from the mock branch of `AuthProvider` only)
+keeps `mock/session.ts` in step with the Manager/Driver switcher: a signed-in driver →
+their repository id (`mock-gianni`), a manager or logged out → `null`. Supabase mode never
+touches it.
+
+**Not built:** manager Attendance and Check-in evidence UI (AT-C2); end-to-end
+verification and HANDOFF rewrite (AT-D); payroll; GPS; check-out; lateness.

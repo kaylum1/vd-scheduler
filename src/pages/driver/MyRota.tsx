@@ -3,6 +3,8 @@ import { PageHeader } from '../../components/layout/PageHeader';
 import { WeekNav, getWeekRelation } from '../../components/rota/WeekNav';
 import { DriverRotaDay } from '../../components/driver-rota/DriverRotaDay';
 import { useDriverWeekRota } from '../../components/driver-rota/useDriverWeekRota';
+import { useCheckInClock } from '../../components/driver-rota/useCheckInClock';
+import { useDriverCheckIn } from '../../components/driver-rota/useDriverCheckIn';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -17,8 +19,9 @@ import type { DriverRotaShift } from '../../repositories/domain';
 /**
  * Live Driver My Rota: the signed-in driver's OWN published shifts for one
  * operational (Monday-Sunday, Europe/Zurich) week, read through the repository
- * layer only. Read-only -- there is nothing a driver can change here, and no
- * availability or pay information is shown (Availability is its own page).
+ * layer only. The one thing a driver can do here is Check in to their own
+ * shift inside its server-computed window; no availability, attendance or pay
+ * information is shown (Availability is its own page).
  *
  * It tells three situations apart, because they mean different things to a
  * driver: the week is not published yet / no rota was published, the week is
@@ -50,6 +53,10 @@ export function MyRotaPage() {
   }, [rota]);
 
   const today = toISODate(getOperationalToday());
+  // One light page-level clock for every shift's check-in display; the server stays authoritative.
+  const shiftsForClock = useMemo(() => rota?.shifts ?? [], [rota]);
+  const now = useCheckInClock(shiftsForClock);
+  const { checkIn, statusOf } = useDriverCheckIn(driverId, weekStartIso);
 
   return (
     <div className="page">
@@ -96,7 +103,7 @@ export function MyRotaPage() {
         ) : (
           <div className="driver-rota">
             {days.map(([date, shifts]) => (
-              <DriverRotaDay key={date} date={date} shifts={shifts} isToday={date === today} />
+              <DriverRotaDay key={date} date={date} shifts={shifts} isToday={date === today} now={now} statusOf={statusOf} onCheckIn={checkIn} />
             ))}
           </div>
         )}

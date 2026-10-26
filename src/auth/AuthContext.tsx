@@ -6,6 +6,7 @@ import { queryClient } from '../lib/queryClient';
 import { useAppState } from '../state/AppStateContext';
 import { driverById } from '../mock-data/drivers';
 import { SupabaseAuthService } from './supabaseAuthService';
+import { MockActingDriverBridge } from './MockActingDriverBridge';
 import type { AccessDeniedReason, AppRole, AuthErrorInfo, CurrentUser, SignInOutcome } from './types';
 
 export interface AuthContextValue {
@@ -92,11 +93,21 @@ function buildMockAuthValue(appState: ReturnType<typeof useAppState>): AuthConte
 /**
  * Mock mode needs no extra provider (useAuth() reads useAppState()
  * directly, see above) — this mounts the real, stateful Supabase auth
- * provider only when actually needed.
+ * provider only when actually needed. Mock mode does mount the acting-driver
+ * bridge, which keeps the mock repository's session stand-in in step with the
+ * Manager/Driver switcher (for the one driver action with no driver id).
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const provider = getDataProvider();
-  return provider === 'mock' ? <>{children}</> : <SupabaseAuthProviderInner>{children}</SupabaseAuthProviderInner>;
+  if (provider === 'mock') {
+    return (
+      <>
+        <MockActingDriverBridge />
+        {children}
+      </>
+    );
+  }
+  return <SupabaseAuthProviderInner>{children}</SupabaseAuthProviderInner>;
 }
 
 function SupabaseAuthProviderInner({ children }: { children: React.ReactNode }) {

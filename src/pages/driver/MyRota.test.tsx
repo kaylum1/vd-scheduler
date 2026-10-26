@@ -135,7 +135,9 @@ describe('MyRotaPage (live Driver My Rota)', () => {
     const day = await screen.findByRole('region', { name: /Monday/i });
     expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(1);
     const items = within(day).getAllByRole('listitem');
-    expect(items.map((li) => li.textContent)).toEqual(['Lunch12:00–14:00', 'Dinner18:00–21:30']);
+    // (Each entry also carries its own Check in area -- covered in MyRotaCheckIn.test.tsx; this is about name/time and order.)
+    const nameAndTime = (li: HTMLElement) => `${li.querySelector('.driver-rota__shift-name')?.textContent}${li.querySelector('.driver-rota__shift-time')?.textContent}`;
+    expect(items.map(nameAndTime)).toEqual(['Lunch12:00–14:00', 'Dinner18:00–21:30']);
     expect(screen.getByText('2 shifts')).toBeInTheDocument();
   });
 

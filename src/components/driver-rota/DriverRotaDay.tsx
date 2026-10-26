@@ -3,13 +3,30 @@ import { StatusPill } from '../ui/StatusPill';
 import { IconClock } from '../ui/icons';
 import { formatDayLabel, parseISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
 import type { DriverRotaShift } from '../../repositories/domain';
+import { DriverShiftCheckIn } from './DriverShiftCheckIn';
+import type { ShiftCheckInStatus } from './useDriverCheckIn';
 
 /**
  * One day of the driver's rota and the shifts they are assigned to that day.
- * Purely presentational and read-only: the driver sees what, when -- nothing
- * about colleagues, headcount or pay exists on DriverRotaShift to show.
+ * Purely presentational: the driver sees what, when, and their own Check in
+ * control -- nothing about colleagues, headcount or pay exists on
+ * DriverRotaShift to show. The clock and check-in state come from the page.
  */
-export function DriverRotaDay({ date, shifts, isToday }: { date: string; shifts: DriverRotaShift[]; isToday: boolean }) {
+export function DriverRotaDay({
+  date,
+  shifts,
+  isToday,
+  now,
+  statusOf,
+  onCheckIn,
+}: {
+  date: string;
+  shifts: DriverRotaShift[];
+  isToday: boolean;
+  now: Date;
+  statusOf: (assignmentId: string) => ShiftCheckInStatus;
+  onCheckIn: (assignmentId: string) => void;
+}) {
   const day = parseISODate(date);
   const headingId = `driver-rota-day-${date}`;
   return (
@@ -26,6 +43,7 @@ export function DriverRotaDay({ date, shifts, isToday }: { date: string; shifts:
               <IconClock style={{ width: 12, height: 12 }} aria-hidden="true" />
               {shift.startTime}–{shift.endTime}
             </span>
+            <DriverShiftCheckIn shift={shift} now={now} status={statusOf(shift.assignmentId)} onCheckIn={onCheckIn} />
           </li>
         ))}
       </ul>

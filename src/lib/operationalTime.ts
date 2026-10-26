@@ -68,3 +68,16 @@ export function getOperationalToday(timezone: string = DEFAULT_OPERATIONAL_TIMEZ
   now.setHours(0, 0, 0, 0);
   return now;
 }
+
+/**
+ * An absolute INSTANT (a database `timestamptz`, e.g. a check-in time or a server-computed
+ * check-in window edge) rendered as 24-hour "HH:MM" in the operational timezone -- never the
+ * viewer's device timezone. This is display only: nothing here decides, derives or compares
+ * a business instant (the database computes those). Shift wall-clock times like "18:00" are
+ * NOT passed through this -- they are shown verbatim, as above.
+ */
+export function formatOperationalClock(instant: string | Date, timezone: string = DEFAULT_OPERATIONAL_TIMEZONE): string {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${part('hour')}:${part('minute')}`;
+}
