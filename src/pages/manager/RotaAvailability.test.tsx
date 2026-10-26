@@ -115,10 +115,11 @@ describe('RotaAvailabilityPage: the Stage 1.1 mock preview is gone', () => {
     expect(screen.queryByRole('heading', { name: 'Zermatt', level: 2 })).not.toBeInTheDocument();
   });
 
-  it('has no fake "current week is published" logic and no dead Publish button', async () => {
+  it('has no fake "current week is published" logic; its Publish Rota control is the real one inside the Manual Rota panel (no separate page, no unpublish)', async () => {
     renderPage();
     await screen.findByRole('article', { name: /^Dinner,/ });
-    expect(screen.queryByRole('button', { name: /publish/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Publish Rota' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /unpublish|retract|republish/i })).not.toBeInTheDocument();
     expect(rotaAvailabilitySource).not.toMatch(/isCurrentWeek|Publish rota|ResortWeekSection|mock-data\/resorts|Rota \(preview\)/);
   });
 

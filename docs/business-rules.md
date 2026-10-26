@@ -1250,17 +1250,16 @@ shifts on one day.
   generated assignment is manual, and re-running refills open slots (so a removed
   auto assignment can be re-added by a later run).
 - The planner is a greedy heuristic (scarcity-first), not a global optimum.
-- **Nothing is visible to drivers until the week is published**, and there is no
-  Publish workflow yet (next checkpoint: minimal Publish Rota).
+- **Nothing is visible to drivers until the week is published** (publishing is §S).
 - The availability read is bounded by the API's 1000-row cap (shifts × drivers).
 
 
-## S. Publish Rota — database and repository (PB-A, PB-B) — UI NOT implemented yet
+## S. Publish Rota — database, repository and manager UI (PB-A, PB-B, PB-C)
 
-**Status: Publish Rota is IN PROGRESS and is NOT complete.** The authoritative
-database RPC (PB-A) and the repository / error contract / mock provider (PB-B) are
-built and tested. **There is no manager Publish control yet** — no button, dialog
-or hook; that is PB-C — so a manager still cannot publish from the app.
+**Status: PB-C (the manager Publish UI) is implemented; final verification and the
+HANDOFF refresh are PB-D, so Publish Rota is not yet declared complete.** The
+authoritative database RPC (PB-A), the repository / error contract / mock provider
+(PB-B) and the Manual Rota Publish control (PB-C, below) are built and tested.
 
 **What publishing means.** One deliberate, server-validated act per resort +
 Monday–Sunday week that (a) makes the week's assigned shifts visible to drivers,
@@ -1319,6 +1318,50 @@ errors over `mockRotaPublications`, so a mock publish feeds the manager rota,
 Driver My Rota, the Availability lock and the Auto-Rota block; it has no lock or
 concurrency (that is the database's, tested in `87_publish_rota.sql`).
 
-**Not built yet (PB-C / PB-D):** the Publish Rota button and confirmation dialog in
-the Manual Rota header, the mutation and query invalidation, and the HANDOFF
+**PB-C (manager UI).** Inside the existing Manager → Rota & Availability → Manual
+Rota card (no new page), the header holds **[Generate Rota] [Publish Rota]** for the
+selected resort + week: **Publish Rota is the primary action, Generate Rota
+secondary** (Publish is the final decision). On narrow screens both stay full-size
+and share one row.
+- **Enabled** only for a loaded, unpublished week with at least one shift dated the
+  operational today (Europe/Zurich) or later: today and a partially historical week
+  are allowed. Disabled, each with visible text tied to the control: already
+  published (the control reads **Published**: "This rota has already been
+  published."), no shifts ("There are no shifts to publish this week."), wholly past
+  ("This rota can’t be published because the week is in the past."). It is also
+  disabled while a Publish or a Generate call is running. The Draft/Published chip
+  stays the authority; Generate's own reason ("Auto-Rota can’t run after this rota
+  has been published.") is unchanged and there is no Publish-specific Generate logic.
+- **Confirmation** (the shared accessible dialog): resort, week, and what publishing
+  does — makes assigned shifts visible to drivers, locks driver availability for the
+  week, stops Auto-Rota generation. It shows no coverage prediction before the server
+  answers. The first call is `publishRota({ confirmUncovered: false })`.
+- **Uncovered positions are the server's call.** If the repository raises the typed
+  confirmation-required error, the same dialog switches to "N position(s) still
+  uncovered" using the SERVER's count (correct singular/plural), the standing line
+  "You can still publish this rota…", an extra "No drivers are assigned yet." when the
+  loaded week has no active assignment, and **Publish anyway** (`confirmUncovered:
+  true`). The confirmed call's result is authoritative: if the count changed, the
+  manager is not asked a third time, and a publish with positions left reads as a
+  warning-toned notice ("Rota published. N positions are still uncovered…"), never an
+  error.
+- **Already published** (for example another session got there first) is a success
+  ("This rota is already published."); the week is refetched and flips to Published.
+- **Pending / lifecycle.** While publishing, both header buttons and the dialog are
+  disabled and the confirm button reads "Publishing…"; a second click cannot start a
+  second call. Changing resort or week closes the dialog and clears the notice, and a
+  result that arrives after the manager moved on is never shown on the new selection.
+  Typed publish errors show first-party copy inline (alert); an unknown or network
+  failure shows a generic message; the rota stays on screen and Publish stays usable.
+  No SQLSTATE, VD003 or database text ever reaches the UI.
+- **Refresh after a successful publish:** the manager rota for that resort + week, the
+  manager Availability summary for that resort + week and the per-driver Availability
+  detail queries for that week (the shared `availabilityKeys`); nothing for payroll,
+  configuration, other weeks or other resorts, and no driver cache.
+- **Publish only.** There is no unpublish, retract, republish or make-draft control
+  or wording. After publishing, Generate is disabled, **manual Assign and Remove stay
+  available** (today and future shifts, per the existing rules), a manual edit never
+  unpublishes the week, and drivers see it on their next refetch without republishing.
+
+**Not built yet (PB-D):** the final end-to-end Publish verification and the HANDOFF
 rewrite.

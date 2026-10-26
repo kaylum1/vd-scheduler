@@ -10,6 +10,9 @@ import { AssignDriverDialog, type AssignDialogState } from './AssignDriverDialog
 import { ManualRotaShiftCard, assignKey, removeKey } from './ManualRotaShiftCard';
 import { useManagerWeekRota } from './useManagerWeekRota';
 import { describeRotaError } from './rotaErrorMessages';
+import { PublishRotaDialog } from './PublishRotaDialog';
+import { usePublishRota } from './usePublishRota';
+import { getPublishAvailability, hasNoActiveAssignments } from './publishRotaUi';
 import { describeAutoRotaError, describeAutoRotaResult, getGenerateAvailability, hasPastShifts, type DescribedAutoRotaResult } from './autoRotaUi';
 import { formatDayLabel, formatWeekRangeLabel, parseISODate, toISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
@@ -37,8 +40,9 @@ function describeShift(shift: ManagerRotaShift): string {
  * "override required" from the server (they changed their answer since the
  * page loaded), which opens the matching warning instead of failing.
  *
- * Display-only for publication: it shows whether the week is published but has
- * no publish/unpublish controls, and a published week stays fully editable.
+ * Publication: it shows whether the week is published and hosts Publish Rota
+ * (publish only), as the primary header action beside the
+ * secondary Generate Rota. A published week stays fully editable.
  *
  * It also hosts Generate Rota (Auto-Rota), scoped to the selected resort + week:
  * one confirmation, one repository call (the repository plans and applies it --
@@ -74,6 +78,10 @@ export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId:
     setGenerateOpen(false);
     setGenerateNotice(null);
   }, [resortId, weekStart]);
+
+  // ---- Publish Rota ---------------------------------------------------
+  // Same selection-scoped lifecycle as Generate; the hook owns the dialog stage, the running call and the notice.
+  const publish = usePublishRota(resortId, weekStart);
 
   const assignMutation = useMutation({ mutationFn: (params: AssignDriverParams) => getRepositories().rota.assignDriver(params) });
   const unassignMutation = useMutation({ mutationFn: (params: UnassignDriverParams) => getRepositories().rota.unassignDriver(params) });
@@ -225,6 +233,8 @@ export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId:
   const rota = rotaQuery.data;
   const generateAvailability = getGenerateAvailability(rota, today);
   const generateReasonId = 'manual-rota-generate-reason';
+  const publishAvailability = getPublishAvailability(rota, today);
+  const publishReasonId = 'manual-rota-publish-reason';
   const dialogBusy = dialog ? inFlight.has(assignKey(dialog.shiftInstanceId, dialog.driverId)) : false;
 
   return (
@@ -233,24 +243,46 @@ export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId:
         title="Manual Rota"
         action={
           resortId ? (
-            <Button
-              variant="primary"
-              size="sm"
-              className="manual-rota__generate"
-              disabled={!generateAvailability.enabled || generating}
-              aria-describedby={generateAvailability.reason ? generateReasonId : undefined}
-              aria-busy={generating || undefined}
-              onClick={() => setGenerateOpen(true)}
-            >
-              {generating ? 'Generating…' : 'Generate Rota'}
-            </Button>
+            <div className="manual-rota__actions">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="manual-rota__generate"
+                disabled={!generateAvailability.enabled || generating || publish.publishing}
+                aria-describedby={generateAvailability.reason ? generateReasonId : undefined}
+                aria-busy={generating || undefined}
+                onClick={() => setGenerateOpen(true)}
+              >
+                {generating ? 'Generating…' : 'Generate Rota'}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="manual-rota__publish"
+                disabled={!publishAvailability.enabled || publish.publishing || generating}
+                aria-describedby={publishAvailability.reason ? publishReasonId : undefined}
+                aria-busy={publish.publishing || undefined}
+                onClick={publish.openDialog}
+              >
+                {publish.publishing ? 'Publishing…' : publishAvailability.label}
+              </Button>
+            </div>
           ) : undefined
         }
       />
-      {resortId && generateAvailability.reason && (
-        <p id={generateReasonId} className="manual-rota__generate-reason">
-          {generateAvailability.reason}
-        </p>
+      {resortId && (generateAvailability.reason || publishAvailability.reason) && (
+        <div className="manual-rota__reasons">
+          {generateAvailability.reason && (
+            <p id={generateReasonId} className="manual-rota__generate-reason">
+              {generateAvailability.reason}
+            </p>
+          )}
+          {publishAvailability.reason && (
+            <p id={publishReasonId} className="manual-rota__publish-reason">
+              {publishAvailability.reason}
+            </p>
+          )}
+        </div>
       )}
       <div className="manual-rota">
         {!resortId ? (
@@ -270,6 +302,11 @@ export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId:
           <>
             {rota.isPublished && (
               <InlineNotice tone="info">This rota is published. Manager assignment changes are visible immediately.</InlineNotice>
+            )}
+            {publish.notice && (
+              <InlineNotice tone={publish.notice.tone} onDismiss={publish.dismissNotice}>
+                {publish.notice.text}
+              </InlineNotice>
             )}
             {generateNotice && (
               <InlineNotice tone={generateNotice.tone} onDismiss={() => setGenerateNotice(null)}>
@@ -336,6 +373,19 @@ export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId:
               {hasPastShifts(rota, today) && <p className="generate-dialog__note">Past shifts will not be changed.</p>}
             </div>
           }
+        />
+      )}
+
+      {publish.open && resortId && (
+        <PublishRotaDialog
+          stage={publish.stage}
+          uncoveredSlots={publish.uncoveredSlots}
+          noDriversAssigned={hasNoActiveAssignments(rota)}
+          resortName={resortName}
+          weekLabel={formatWeekRangeLabel(parseISODate(weekStart))}
+          busy={publish.publishing}
+          onConfirm={() => void publish.confirm()}
+          onCancel={publish.cancel}
         />
       )}
 
