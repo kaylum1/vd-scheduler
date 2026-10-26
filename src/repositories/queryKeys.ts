@@ -22,3 +22,20 @@ export const driverRotaKeys = {
   all: ['driver-rota'] as const,
   week: (driverId: string, weekStart: string) => ['driver-rota', driverId, weekStart] as const,
 };
+
+/**
+ * Manager Availability panel keys (summary per resort + week, expanded
+ * per-driver detail per driver + week). Shared so the panel that reads them and
+ * anything that must refresh them -- publishing a rota locks the week -- agree
+ * on the exact shape.
+ */
+export const availabilityKeys = {
+  managerSummary: (resortId: string | null, weekStart: string) => ['availability', 'managerSummary', resortId, weekStart] as const,
+  managerDetail: (driverId: string | null, weekStart: string) => ['availability', 'managerDetail', driverId, weekStart] as const,
+  /**
+   * Matches every manager per-driver detail cached for ONE week. The driver id
+   * sits in the middle of the key, so this is a predicate rather than a prefix.
+   */
+  isManagerDetailForWeek: (queryKey: readonly unknown[], weekStart: string) =>
+    queryKey[0] === 'availability' && queryKey[1] === 'managerDetail' && queryKey[3] === weekStart,
+};

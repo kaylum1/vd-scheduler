@@ -216,8 +216,10 @@ select pg_temp.expect_true('unpublished week with an assignment: the driver sees
   not exists (select 1 from driver_visible_assignments where week_start = '2027-07-05')
   and not exists (select 1 from driver_visible_week_publications where week_start = '2027-07-05'));
 
--- Publish it (manager, direct row write -- there is no publish RPC yet).
-select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
+-- Publish it. Managers can no longer write rota_publications directly (PB-A:
+-- publish_rota is the application path, covered by 87_publish_rota.sql), so
+-- this fixture writes the row as the database owner.
+select pg_temp.as_postgres();
 insert into rota_publications (resort_id, week_start, generation_source)
 values (current_setting('dbtest.resort_a')::uuid, '2027-07-05', 'manual');
 
@@ -245,8 +247,9 @@ select pg_temp.expect_true('manager removes an assignment after publication: it 
   and exists (select 1 from driver_visible_assignments where shift_instance_id = current_setting('dbtest.pub_flow_lunch')::uuid)
   and exists (select 1 from driver_visible_week_publications where week_start = '2027-07-05'));
 
--- Unpublish (the existing semantics: unpublished_at set -- there is no unpublish RPC to call).
-select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
+-- Unpublish (the existing semantics: unpublished_at set -- there is no unpublish RPC in V1,
+-- so the fixture writes the row as the database owner).
+select pg_temp.as_postgres();
 update rota_publications set unpublished_at = now()
  where resort_id = current_setting('dbtest.resort_a')::uuid and week_start = '2027-07-05';
 

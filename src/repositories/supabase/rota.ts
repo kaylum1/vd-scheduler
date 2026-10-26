@@ -9,6 +9,8 @@ import type {
   GenerateAutoRotaParams,
   DriverWeekRota,
   ManagerWeekRota,
+  PublishRotaParams,
+  PublishRotaResult,
   UnassignDriverParams,
   UnassignDriverResult,
 } from '../domain';
@@ -20,13 +22,14 @@ import { buildDriverWeekRota } from '../driverRotaModel';
 import { buildManagerWeekRota } from '../managerRotaModel';
 import {
   mapDriverVisibleAssignment,
+  mapPublishRotaResult,
   mapRotaBuildAssignment,
   mapRotaBuildAvailability,
   mapRotaBuildDriver,
   mapShiftInstance,
   parseRotaAvailabilityState,
 } from './mappers';
-import { mapAutoRotaRpcError, mapRotaRpcError } from './rotaErrors';
+import { mapAutoRotaRpcError, mapPublishRotaRpcError, mapRotaRpcError } from './rotaErrors';
 
 export class SupabaseRotaRepository implements RotaRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
@@ -210,5 +213,27 @@ export class SupabaseRotaRepository implements RotaRepository {
       skippedPastShiftCount: row.skipped_past_shift_count,
       runId: row.run_id,
     };
+  }
+
+  /**
+   * RPC wrapper only: exactly one publish_rota call per invocation. Writes to
+   * rota_publications are revoked for every client role, so this is the sole
+   * publish path; coverage counting, the confirmation rule, history / shift /
+   * resort guards, idempotency and the publication metadata are all the database's
+   * (PB-A) -- nothing is re-implemented or derived here.
+   */
+  async publishRota(params: PublishRotaParams): Promise<PublishRotaResult> {
+    const operation = 'rota.publishRota';
+    const { data, error } = await this.client.rpc('publish_rota', {
+      p_resort_id: params.resortId,
+      p_week_start: params.weekStart,
+      p_confirm_uncovered: params.confirmUncovered === true,
+    });
+    if (error) throw mapPublishRotaRpcError(operation, error);
+
+    // Already published is a normal success row; the server's own counts are returned untouched.
+    const result = mapPublishRotaResult(data?.[0]);
+    if (!result) throw new RepositoryError('rota.publishRota returned an unexpected result', { operation, cause: data });
+    return result;
   }
 }

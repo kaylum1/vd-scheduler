@@ -7,6 +7,7 @@ import { useResortsQuery } from '../ui/ResortSelector';
 import { IconCalendar, IconClock, IconLock } from '../ui/icons';
 import { formatDayLabel, parseISODate, WEEKDAY_LABELS_FULL } from '../../mock-data/date-utils';
 import { getRepositories } from '../../repositories';
+import { availabilityKeys } from '../../repositories/queryKeys';
 import type { AvailabilitySubmissionSummary, DriverWeekAvailabilityState } from '../../repositories/domain';
 
 const STATE_LABEL: Record<DriverWeekAvailabilityState, string> = {
@@ -49,13 +50,13 @@ export function ManagerAvailabilityPanel({ resortId, weekStart }: { resortId: st
   const resortName = resortsQuery.data?.find((r) => r.id === resortId)?.name ?? null;
 
   const summaryQuery = useQuery({
-    queryKey: ['availability', 'managerSummary', resortId, weekStart],
+    queryKey: availabilityKeys.managerSummary(resortId, weekStart),
     queryFn: () => getRepositories().availability.listAvailabilitySubmissionStatus(resortId as string, weekStart),
     enabled: !!resortId,
   });
 
   const detailQuery = useQuery({
-    queryKey: ['availability', 'managerDetail', expandedDriverId, weekStart],
+    queryKey: availabilityKeys.managerDetail(expandedDriverId, weekStart),
     queryFn: () => getRepositories().availability.getResortWeekAvailability(expandedDriverId as string, weekStart),
     enabled: !!expandedDriverId,
   });

@@ -18,6 +18,9 @@
  */
 
 import {
+  PublishRotaConfirmationRequiredError,
+  PublishRotaError,
+  type PublishRotaErrorKind,
   AutoRotaError,
   AvailabilityOverrideRequiredError,
   RepositoryError,
@@ -89,4 +92,52 @@ export function mapAutoRotaRpcError(operation: string, error: PostgrestLikeError
       break;
   }
   return new AutoRotaError(kind, options);
+}
+
+/**
+ * publish_rota's contract (PB-A migration 20261026100000):
+ *   VD003  DETAIL = the uncovered position count ("3")  -> confirmation required
+ *   55006  DETAIL historical_week
+ *   23514  DETAIL no_shifts | resort_inactive
+ *   42501  not a manager     P0002  resort not found
+ *   22023  null argument / not a Monday (no DETAIL)
+ * Already published is a success row, never an error. The machine-readable value
+ * comes from DETAIL only -- never from the message -- and anything unrecognised,
+ * including a known SQLSTATE with an unexpected DETAIL, becomes kind 'unknown'.
+ */
+export function mapPublishRotaRpcError(operation: string, error: PostgrestLikeError): PublishRotaError | PublishRotaConfirmationRequiredError {
+  const options = { operation, code: error.code, cause: error };
+  const detail = error.details ?? null;
+  let kind: PublishRotaErrorKind = 'unknown';
+
+  switch (error.code) {
+    case 'VD003': {
+      const uncovered = parseUncoveredCount(detail);
+      if (uncovered !== null) return new PublishRotaConfirmationRequiredError(uncovered, { operation, cause: error });
+      break;
+    }
+    case '55006':
+      if (detail === 'historical_week') kind = 'historical_week';
+      break;
+    case '23514':
+      if (detail === 'no_shifts' || detail === 'resort_inactive') kind = detail;
+      break;
+    case '42501':
+      kind = 'permission_denied';
+      break;
+    case 'P0002':
+      kind = 'resort_not_found';
+      break;
+    case '22023':
+      if (detail === null) kind = 'invalid_week';
+      break;
+  }
+  return new PublishRotaError(kind, options);
+}
+
+/** A strictly positive integer written in plain digits ("1", "17"); everything else ("", "0", "-1", "2.5", " 3", "abc", null) is not a count. */
+function parseUncoveredCount(detail: string | null): number | null {
+  if (detail === null || !/^[1-9][0-9]*$/.test(detail)) return null;
+  const count = Number(detail);
+  return Number.isSafeInteger(count) ? count : null;
 }
