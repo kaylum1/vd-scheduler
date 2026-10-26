@@ -1339,6 +1339,20 @@ export type Database = {
           will_change: boolean
         }[]
       }
+      publish_rota: {
+        Args: {
+          p_confirm_uncovered?: boolean
+          p_resort_id: string
+          p_week_start: string
+        }
+        Returns: {
+          already_published: boolean
+          published_at: string
+          resort_id: string
+          uncovered_slots: number
+          week_start: string
+        }[]
+      }
       reactivate_resort: {
         Args: { p_resort_id: string }
         Returns: {

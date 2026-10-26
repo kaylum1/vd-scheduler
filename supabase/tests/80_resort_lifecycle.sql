@@ -154,19 +154,17 @@ begin
 end $$;
 
 -- Blocked by a published week.
-do $$
-begin
-  insert into rota_publications (resort_id, week_start, generation_source)
-  values (current_setting('dbtest.blocked_resort_id')::uuid, '2027-01-04', 'manual'); -- a Monday
-end $$;
+select pg_temp.as_postgres(); -- managers have no direct rota_publications write (PB-A); fixture row as owner
+insert into rota_publications (resort_id, week_start, generation_source)
+values (current_setting('dbtest.blocked_resort_id')::uuid, '2027-01-04', 'manual'); -- a Monday
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
 select pg_temp.expect_error('deactivate_resort: blocked by a published week (55006)',
   format('select deactivate_resort(%L::uuid)', current_setting('dbtest.blocked_resort_id')), '55006');
 
-do $$
-begin
-  update rota_publications set unpublished_at = now()
+select pg_temp.as_postgres();
+update rota_publications set unpublished_at = now()
   where resort_id = current_setting('dbtest.blocked_resort_id')::uuid;
-end $$;
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
 
 -- All dependents retired -- deactivation now succeeds.
 do $$

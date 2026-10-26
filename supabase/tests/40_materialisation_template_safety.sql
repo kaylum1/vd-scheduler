@@ -86,11 +86,12 @@ select pg_temp.expect_true('adhoc protection: an origin=adhoc instance is exclud
 -- Published/history/attendance protection: excluded from refresh even
 -- though origin=template and a governing template exists.
 -- ---------------------------------------------------------------------
+select pg_temp.as_postgres(); -- managers have no direct rota_publications write (PB-A); fixture row as owner
+insert into rota_publications (resort_id, week_start, generation_source)
+values (current_setting('dbtest.resort_a')::uuid, '2027-07-12', 'manual'); -- covers the 2027-07-12 week (Mon 07-12)
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
 do $$
 begin
-  insert into rota_publications (resort_id, week_start, generation_source)
-  values (current_setting('dbtest.resort_a')::uuid, '2027-07-12', 'manual'); -- covers the 2027-07-12 week (Mon 07-12)
-
   insert into attendance (shift_instance_id, driver_id, resort_id, status)
   select id, current_setting('dbtest.driver_a_id')::uuid, current_setting('dbtest.resort_a')::uuid, 'worked'
   from shift_instances where shift_type_id = current_setting('dbtest.mat_shift_type')::uuid and date = '2027-07-15';

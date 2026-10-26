@@ -731,6 +731,9 @@ select unassign_driver(current_setting('dbtest.ar_sl_unassign')::uuid, current_s
 select pg_temp.expect_true('lock: unassign_driver takes the lock for its shift''s resort + week',
   pg_temp.ar_lock_held(current_setting('dbtest.resort_a')::uuid, current_setting('dbtest.ar_wl_unassign')::date));
 
+-- Direct publication writes are owner-only since PB-A (publish_rota is the manager path,
+-- proven to take the same lock in 87_publish_rota.sql); the trigger fires for any writer.
+select pg_temp.as_postgres();
 insert into rota_publications (resort_id, week_start, generation_source)
 values (current_setting('dbtest.resort_a')::uuid, pg_temp.ar_monday(operational_today(current_setting('dbtest.resort_a')::uuid) + 84), 'manual');
 select pg_temp.expect_true('lock: a publication INSERT (publish) takes the lock for its resort + week',
