@@ -339,6 +339,39 @@ export type Database = {
           },
         ]
       }
+      driver_check_ins: {
+        Row: {
+          assignment_id: string
+          checked_in_at: string
+          id: string
+        }
+        Insert: {
+          assignment_id: string
+          checked_in_at: string
+          id?: string
+        }
+        Update: {
+          assignment_id?: string
+          checked_in_at?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_check_ins_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: true
+            referencedRelation: "driver_visible_assignments"
+            referencedColumns: ["assignment_id"]
+          },
+          {
+            foreignKeyName: "driver_check_ins_assignment_id_fkey"
+            columns: ["assignment_id"]
+            isOneToOne: true
+            referencedRelation: "rota_assignments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       driver_delivery_rates: {
         Row: {
           created_at: string
@@ -995,6 +1028,9 @@ export type Database = {
       driver_visible_assignments: {
         Row: {
           assignment_id: string | null
+          check_in_closes_at: string | null
+          check_in_opens_at: string | null
+          checked_in_at: string | null
           date: string | null
           end_time: string | null
           name: string | null
@@ -1165,6 +1201,23 @@ export type Database = {
           start_time: string
         }[]
       }
+      _check_in: {
+        Args: { p_assignment_id: string; p_at?: string; p_driver_id: string }
+        Returns: {
+          assignment_id: string
+          check_in_id: string
+          checked_in_at: string
+          created: boolean
+          shift_instance_id: string
+        }[]
+      }
+      _check_in_window: {
+        Args: { p_shift_instance_id: string }
+        Returns: {
+          closes_at: string
+          opens_at: string
+        }[]
+      }
       app_weekday: { Args: { d: string }; Returns: number }
       apply_auto_rota: {
         Args: { p_plan: Json; p_resort_id: string; p_week_start: string }
@@ -1207,6 +1260,16 @@ export type Database = {
         Returns: {
           assignment_id: string
           availability_state: string
+        }[]
+      }
+      check_in_to_shift: {
+        Args: { p_assignment_id: string }
+        Returns: {
+          assignment_id: string
+          check_in_id: string
+          checked_in_at: string
+          created: boolean
+          shift_instance_id: string
         }[]
       }
       clear_attendance: {

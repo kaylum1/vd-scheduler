@@ -1482,3 +1482,69 @@ week_start, previous_status, reason`.
 **Deferred / not built:** `actual_start` / `actual_end` (reserved columns, not exposed
 by the RPCs), repository / mock / read-model / UI (AT-B, AT-C), payroll calculation,
 Onfleet, the live Dashboard, an audited historical-assignment workflow.
+
+## U. Driver Check-in — database foundation (AT-A2) — UI / repository NOT implemented yet
+
+**Status: only the authoritative database layer exists (AT-A2). There is no Check-in
+button, repository method, mock state or manager display yet, and neither Driver Check-in
+nor Attendance is complete.**
+
+**Evidence vs truth.** A driver's **Check-in is operational evidence**; the manager's
+**final Attendance (§T) is payroll truth**. Check-in never creates, implies or changes an
+attendance row and has no pay meaning; payroll will read Attendance, not Check-in. All four
+combinations are legal and the manager is never blocked: checked in + Worked / No show /
+Excused / Cancelled, and not checked in + Worked / No show. A missing check-in is evidence,
+not a blocker.
+
+**What it records.** One immutable row per rota assignment in `driver_check_ins`
+(`id`, `assignment_id` unique with FK `ON DELETE RESTRICT`, `checked_in_at`) written only
+by `check_in_to_shift(p_assignment_id)` with the **server** time (read after the week lock
+is held). The caller supplies neither a time nor a driver id. There is no location (no GPS,
+geofence, IP, photo or device id): **a check-in proves only that the authenticated driver
+invoked the app's check-in at that moment**. No check-out, no persisted late status or
+minutes late, no clear-check-in workflow in V1.
+
+**Who and when.** Only an **active driver** who owns the assignment: a manager cannot check
+in on a driver's behalf, an inactive driver and anon are denied (`42501`), and another
+driver's assignment is indistinguishable from a missing one (`P0002`, so assignment ids
+cannot be probed). The week must be **currently Published** and the shift active. The
+**window opens 30 minutes before the scheduled start and closes at the scheduled end, both
+inclusive**, computed from the shift date, wall-clock times and the **resort's own timezone**
+(absolute `timestamptz` comparison, so DST cannot shift the 30 minutes). A late check-in
+inside the window is valid. Lunch and Dinner on one day each have their own check-in.
+
+**Idempotency and Attendance.** A repeat call returns the **original** check-in (`created =
+false`): no update, no second row, no second audit event — and it is checked before every
+gate, so a legitimate retry still succeeds after the window closed or after Attendance was
+recorded. If **no check-in exists and final Attendance already does**, a new check-in is
+refused (`attendance_already_recorded`); the window is tested first so a driver is not told
+attendance exists unless the window is open. If the check-in came first, any Attendance
+status may follow, and `clear_attendance` **never deletes** the check-in.
+
+**Unassign and serialization.** `unassign_driver` now also refuses when a check-in exists
+(`55006` DETAIL `check_in_recorded`, distinct from `attendance_recorded`, which keeps
+precedence); the FK is the final defence. If reality differs, the manager records / corrects
+final Attendance. `check_in_to_shift` takes the existing `rota_week_lock` and re-reads, so
+check-in vs unassign (check-in first → unassign refused; unassign first → check-in is
+`assignment_not_found`, no orphan), check-in vs `record_attendance`, vs `clear_attendance`,
+vs Publish and check-in vs check-in all serialize.
+
+**Visibility.** Managers read `driver_check_ins` (SELECT only, no client write). Drivers have
+no table access; they read **their own** `checked_in_at` and the **server-computed**
+`check_in_opens_at` / `check_in_closes_at` through `driver_visible_assignments` (three
+columns appended; the view is still session-filtered to the driver's own published, active
+assignments). No colleague check-in, and no attendance status, ever reaches a driver. The
+manager read model can embed `driver_check_ins(...)` and `attendance(...)` in the existing
+assignments query with no extra round trip (AT-B).
+
+**Audit.** Generic row audit plus context `operation driver_check_in, assignment_id,
+shift_instance_id, driver_id, resort_id, week_start`; an idempotent repeat writes nothing.
+
+**Error contract for AT-B:** `42501` permission_denied · `22023` invalid_request · `P0002`
+assignment_not_found · `55006` + `week_not_published` / `shift_cancelled` /
+`check_in_too_early` / `check_in_closed` / `attendance_already_recorded`; and, from Manual
+Rota, `55006` + `check_in_recorded` on unassign.
+
+**Deferred / not built:** repository, mock, read models and UI (AT-B, AT-C1 driver, AT-C2
+manager), any lateness display or policy, check-out, a manager correction of a check-in,
+location evidence, notifications, payroll calculation.

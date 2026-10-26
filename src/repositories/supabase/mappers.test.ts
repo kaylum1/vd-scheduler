@@ -185,6 +185,10 @@ describe('mapDriverVisibleAssignment', () => {
       name: 'Daily',
       start_time: '08:00',
       end_time: '12:00',
+      // The view now also carries the driver's OWN check-in and window (AT-A2); not mapped yet (AT-B).
+      checked_in_at: null,
+      check_in_opens_at: null,
+      check_in_closes_at: null,
     });
     expect(mapped.assignmentId).toBe('a1');
     expect(mapped).not.toHaveProperty('driverId');
