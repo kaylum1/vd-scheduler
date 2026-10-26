@@ -148,8 +148,8 @@ describe('buildManagerWeekRota', () => {
       })
     );
     expect(rota.shifts[0].assignments).toEqual([
-      { assignmentId: 'a1', driverId: 'd1', driverName: 'Alex', isDriverActive: true, source: 'manual', assignedAt: '2030-01-01T10:00:00Z' },
-      { assignmentId: 'a2', driverId: 'd2', driverName: 'Gone', isDriverActive: false, source: 'manual', assignedAt: '2030-01-01T11:00:00Z' },
+      { assignmentId: 'a1', driverId: 'd1', driverName: 'Alex', isDriverActive: true, source: 'manual', assignedAt: '2030-01-01T10:00:00Z', attendance: null, checkIn: null },
+      { assignmentId: 'a2', driverId: 'd2', driverName: 'Gone', isDriverActive: false, source: 'manual', assignedAt: '2030-01-01T11:00:00Z', attendance: null, checkIn: null },
     ]);
     expect(rota.candidateDrivers.map((d) => d.driverId)).toEqual(['d1']);
     // The inactive assignee has no availability entry -- their state lives on the assignment.

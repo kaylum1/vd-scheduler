@@ -35,11 +35,16 @@ export function buildDriverWeekRota(input: DriverRotaBuildInput): DriverWeekRota
   const shifts: DriverRotaShift[] = input.assignments
     .filter((a) => a.weekStart === input.weekStart)
     .map((a) => ({
+      assignmentId: a.assignmentId,
       shiftInstanceId: a.shiftInstanceId,
       date: a.date,
       shiftName: a.name,
       startTime: clock(a.startTime),
       endTime: clock(a.endTime),
+      // The driver's OWN check-in and the server-computed window pass through untouched: no timezone maths here.
+      checkedInAt: a.checkedInAt,
+      checkInOpensAt: a.checkInOpensAt,
+      checkInClosesAt: a.checkInClosesAt,
     }))
     .sort(
       (a, b) =>

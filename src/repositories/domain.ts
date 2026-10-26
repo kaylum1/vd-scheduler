@@ -203,6 +203,11 @@ export interface DriverVisibleAssignment {
   name: string;
   startTime: string;
   endTime: string;
+  /** The driver's OWN check-in instant (ISO), or null until they check in. */
+  checkedInAt: string | null;
+  /** The server-computed inclusive check-in window (ISO instants, resort timezone). Never derived in TypeScript. */
+  checkInOpensAt: string;
+  checkInClosesAt: string;
 }
 
 /**
@@ -213,11 +218,18 @@ export interface DriverVisibleAssignment {
  * `startTime` / `endTime` are 'HH:MM'.
  */
 export interface DriverRotaShift {
+  /** The driver's own assignment id -- what the future Check in button sends. */
+  assignmentId: string;
   shiftInstanceId: string;
   date: string;
   shiftName: string;
   startTime: string;
   endTime: string;
+  /** The driver's OWN check-in instant (ISO), or null while not checked in. Evidence only: never an attendance status. */
+  checkedInAt: string | null;
+  /** The server-computed inclusive check-in window (ISO instants). For presentation; the server stays authoritative. */
+  checkInOpensAt: string;
+  checkInClosesAt: string;
 }
 
 /**
@@ -490,6 +502,19 @@ export interface ManagerRotaAssignment {
   isDriverActive: boolean;
   source: RotaAssignmentSource;
   assignedAt: string;
+  /** FINAL manager-recorded attendance for this assignment, or null = Not recorded (there is no "pending" status). */
+  attendance: ManagerRotaAttendance | null;
+  /** The driver's check-in EVIDENCE, or null = Not checked in. Never implies attendance. */
+  checkIn: ManagerRotaCheckIn | null;
+}
+
+export interface ManagerRotaAttendance {
+  status: AttendanceStatus;
+  recordedAt: string;
+}
+
+export interface ManagerRotaCheckIn {
+  checkedInAt: string;
 }
 
 export interface ManagerRotaShift {
@@ -642,4 +667,77 @@ export interface PublishRotaResult {
   /** Open positions on today/future shifts at publish time, recounted by the server (0 for a fully covered week). */
   uncoveredSlots: number;
   alreadyPublished: boolean;
+}
+
+// ---------------------------------------------------------------------
+// Attendance (AT-A) and Driver Check-in (AT-A2). The database
+// (record_attendance / clear_attendance / check_in_to_shift) decides every rule;
+// React only ever sees these types and the typed AttendanceError /
+// DriverCheckInError. Check-in is EVIDENCE; final Attendance is the manager's
+// payroll truth, and no Attendance row means "Not recorded".
+// ---------------------------------------------------------------------
+
+/**
+ * `cancelled` means THIS DRIVER was stood down (UI wording: "Cancelled (stood
+ * down)"); it never means the Shift Instance was cancelled.
+ */
+export type AttendanceStatus = 'worked' | 'no_show' | 'excused' | 'cancelled';
+
+export const ATTENDANCE_STATUSES: readonly AttendanceStatus[] = ['worked', 'no_show', 'excused', 'cancelled'];
+
+export interface AttendanceRecord {
+  attendanceId: string;
+  assignmentId: string;
+  shiftInstanceId: string;
+  driverId: string;
+  status: AttendanceStatus;
+  /** The manager's LATEST recording action (a correction refreshes it). */
+  recordedAt: string;
+  updatedAt: string;
+}
+
+export interface RecordAttendanceParams {
+  assignmentId: string;
+  status: AttendanceStatus;
+  /** Audit metadata only (never stored on the attendance row). Required by the server for an unpublished PAST shift. */
+  reason?: string | null;
+}
+
+/** first record: created + changed; correction: !created + changed; same status again: !created + !changed. */
+export interface AttendanceMutationResult {
+  record: AttendanceRecord;
+  created: boolean;
+  changed: boolean;
+}
+
+export interface ClearAttendanceParams {
+  assignmentId: string;
+  /** Required (trimmed, max 500) -- clearing is an audited correction. */
+  reason: string;
+}
+
+/** `previousStatus` is non-null exactly when `changed` is true; an already-clear assignment is changed = false. */
+export interface ClearAttendanceResult {
+  assignmentId: string;
+  previousStatus: AttendanceStatus | null;
+  changed: boolean;
+}
+
+export interface CheckInToShiftParams {
+  /** The ONLY input: the caller's own assignment. Never a driver id or a time -- the server derives both. */
+  assignmentId: string;
+}
+
+/** Evidence only: no attendance status, no pay field, no lateness field. */
+export interface DriverCheckIn {
+  checkInId: string;
+  assignmentId: string;
+  shiftInstanceId: string;
+  checkedInAt: string;
+}
+
+/** A repeat check-in is `created: false` with the ORIGINAL id and timestamp. */
+export interface DriverCheckInResult {
+  checkIn: DriverCheckIn;
+  created: boolean;
 }

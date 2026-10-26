@@ -33,6 +33,25 @@ interface RecordedQuery {
  * importantly -- that nothing is ever written.
  */
 type RpcResult = { data: unknown; error: unknown };
+
+/** Splits a PostgREST select list on commas that are NOT inside an embed's parentheses. */
+function splitTopLevel(select: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of select) {
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      out.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current);
+  return out;
+}
 type RpcResponder = RpcResult | ((args: Record<string, unknown>, callNumber: number) => RpcResult);
 
 function createFakeClient(tables: Record<string, Row[]>, rpcResults: Record<string, RpcResponder> = {}) {
@@ -65,7 +84,8 @@ function createFakeClient(tables: Record<string, Row[]>, rpcResults: Record<stri
           for (const f of rec.filters) {
             rows = rows.filter((r) => (f.op === 'eq' ? r[f.column] === f.value : (f.value as unknown[]).includes(r[f.column])));
           }
-          const columns = rec.select && rec.select !== '*' ? rec.select.split(',').map((c) => c.trim()) : null;
+          // Top-level columns only: an embed such as `attendance(status, recorded_at)` is ONE selected key whose value is the row's own nested data.
+          const columns = rec.select && rec.select !== '*' ? splitTopLevel(rec.select).map((c) => c.replace(/\(.*$/s, '').trim()) : null;
           const projected = columns ? rows.map((r) => Object.fromEntries(columns.map((c) => [c, r[c]]))) : rows;
           return Promise.resolve({ data: projected, error: null }).then(resolve);
         },
@@ -394,8 +414,13 @@ const myAssignmentRow = (shiftInstanceId: string, over: Row = {}): Row => ({
   name: 'Dinner',
   start_time: '18:00:00',
   end_time: '21:30:00',
+  checked_in_at: null,
+  check_in_opens_at: '2030-01-07T16:30:00+00:00',
+  check_in_closes_at: '2030-01-07T20:30:00+00:00',
   ...over,
 });
+
+const NO_CHECK_IN = { checkedInAt: null, checkInOpensAt: '2030-01-07T16:30:00+00:00', checkInClosesAt: '2030-01-07T20:30:00+00:00' };
 
 const publicationRow = (week = DRIVER_WEEK): Row => ({ resort_id: RESORT, week_start: week });
 
@@ -458,9 +483,9 @@ describe('SupabaseRotaRepository.getDriverWeekRota', () => {
       ],
     });
     expect((await promise).shifts).toEqual([
-      { shiftInstanceId: 'si-mon', date: '2030-01-07', shiftName: 'Dinner', startTime: '18:00', endTime: '21:30' },
-      { shiftInstanceId: 'si-fri-lunch', date: '2030-01-11', shiftName: 'Lunch', startTime: '12:00', endTime: '14:00' },
-      { shiftInstanceId: 'si-fri-dinner', date: '2030-01-11', shiftName: 'Dinner (2P)', startTime: '18:00', endTime: '21:30' },
+      { assignmentId: 'assignment-si-mon', shiftInstanceId: 'si-mon', date: '2030-01-07', shiftName: 'Dinner', startTime: '18:00', endTime: '21:30', ...NO_CHECK_IN },
+      { assignmentId: 'assignment-si-fri-lunch', shiftInstanceId: 'si-fri-lunch', date: '2030-01-11', shiftName: 'Lunch', startTime: '12:00', endTime: '14:00', ...NO_CHECK_IN },
+      { assignmentId: 'assignment-si-fri-dinner', shiftInstanceId: 'si-fri-dinner', date: '2030-01-11', shiftName: 'Dinner (2P)', startTime: '18:00', endTime: '21:30', ...NO_CHECK_IN },
     ]);
   });
 
@@ -828,5 +853,209 @@ describe('SupabaseRotaRepository.publishRota', () => {
     expect(rotaAdapterSource.match(/rpc\(\s*'publish_rota'/g)).toHaveLength(1);
     expect(rotaAdapterSource).not.toMatch(/from\(\s*'rota_publications'\s*\)\s*\.(insert|update|upsert|delete)/);
     expect(rotaAdapterSource).not.toMatch(/generation_source|published_by/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AT-B: the manager week now carries each assignment's attendance + check-in (embedded, one query)
+// ---------------------------------------------------------------------------
+
+describe('SupabaseRotaRepository.getManagerWeekRota: attendance and check-in per assignment', () => {
+  const assignment = (id: string, shift: string, driver: string, embeds: Row = {}): Row => ({
+    id,
+    shift_instance_id: shift,
+    driver_id: driver,
+    resort_id: RESORT,
+    assignment_source: 'manual',
+    assigned_at: `2030-01-01T10:00:0${id.length % 9}Z`,
+    assigned_by: 'secret-manager-id',
+    ...embeds,
+  });
+  const read = async (assignments: Row[], tables: Record<string, Row[]> = standardTables()) => {
+    const fake = createFakeClient({ ...tables, rota_assignments: assignments });
+    const rota = await new SupabaseRotaRepository(fake.client).getManagerWeekRota({ resortId: RESORT, weekStart: WEEK });
+    return { fake, rota, byId: (id: string) => rota.shifts.flatMap((s) => s.assignments).find((a) => a.assignmentId === id)! };
+  };
+
+  it('1. an assignment with no attendance and no check-in maps both to null (Not recorded / Not checked in), never to a status-like value', async () => {
+    const { byId } = await read([assignment('a-1', 'si-fri', 'd-alex', { attendance: null, driver_check_ins: null })]);
+    expect(byId('a-1').attendance).toBeNull();
+    expect(byId('a-1').checkIn).toBeNull();
+  });
+
+  it('1b. embeds that are simply absent (older rows / no relationship data) are also null', async () => {
+    const { byId } = await read([assignment('a-1', 'si-fri', 'd-alex')]);
+    expect(byId('a-1')).toMatchObject({ attendance: null, checkIn: null });
+  });
+
+  it('2. attendance only', async () => {
+    const { byId } = await read([assignment('a-1', 'si-fri', 'd-alex', { attendance: { status: 'no_show', recorded_at: '2030-01-11T21:00:00+00:00' }, driver_check_ins: null })]);
+    expect(byId('a-1').attendance).toEqual({ status: 'no_show', recordedAt: '2030-01-11T21:00:00+00:00' });
+    expect(byId('a-1').checkIn).toBeNull();
+  });
+
+  it('3. check-in only', async () => {
+    const { byId } = await read([assignment('a-1', 'si-fri', 'd-alex', { attendance: null, driver_check_ins: { checked_in_at: '2030-01-11T17:42:00+00:00' } })]);
+    expect(byId('a-1').checkIn).toEqual({ checkedInAt: '2030-01-11T17:42:00+00:00' });
+    expect(byId('a-1').attendance).toBeNull();
+  });
+
+  it('4. both, side by side (one assignment row carries scheduled vs checked in vs final attendance)', async () => {
+    const { byId } = await read([
+      assignment('a-1', 'si-fri', 'd-alex', { attendance: { status: 'worked', recorded_at: '2030-01-11T21:30:00+00:00' }, driver_check_ins: { checked_in_at: '2030-01-11T17:42:00+00:00' } }),
+    ]);
+    expect(byId('a-1')).toMatchObject({
+      attendance: { status: 'worked', recordedAt: '2030-01-11T21:30:00+00:00' },
+      checkIn: { checkedInAt: '2030-01-11T17:42:00+00:00' },
+    });
+  });
+
+  it.each(['worked', 'no_show', 'excused', 'cancelled'] as const)('5-8. maps the %s status', async (status) => {
+    const { byId } = await read([assignment('a-1', 'si-fri', 'd-alex', { attendance: { status, recorded_at: '2030-01-11T21:00:00+00:00' } })]);
+    expect(byId('a-1').attendance?.status).toBe(status);
+  });
+
+  it('accepts an embed returned as a one-element array and treats an empty array as none', async () => {
+    const { byId } = await read([
+      assignment('a-1', 'si-fri', 'd-alex', { attendance: [{ status: 'excused', recorded_at: '2030-01-11T21:00:00+00:00' }], driver_check_ins: [] }),
+    ]);
+    expect(byId('a-1')).toMatchObject({ attendance: { status: 'excused' }, checkIn: null });
+  });
+
+  it('an embed with an unknown attendance status fails safely instead of passing a string along', async () => {
+    const fake = createFakeClient({ ...standardTables(), rota_assignments: [assignment('a-1', 'si-fri', 'd-alex', { attendance: { status: 'late', recorded_at: 'x' } })] });
+    const error = await new SupabaseRotaRepository(fake.client).getManagerWeekRota({ resortId: RESORT, weekStart: WEEK }).catch((e) => e);
+    expect(error).toBeInstanceOf(RepositoryError);
+  });
+
+  it('9. an INACTIVE driver\'s historical assignment still maps its attendance and check-in', async () => {
+    const { byId } = await read([
+      assignment('a-2', 'si-fri', 'd-gone', { attendance: { status: 'worked', recorded_at: '2030-01-11T21:30:00+00:00' }, driver_check_ins: { checked_in_at: '2030-01-11T17:55:00+00:00' } }),
+    ]);
+    expect(byId('a-2')).toMatchObject({ isDriverActive: false, driverName: 'Gone Driver', attendance: { status: 'worked' }, checkIn: { checkedInAt: '2030-01-11T17:55:00+00:00' } });
+  });
+
+  it('10. several assignments on ONE shift each carry their own attendance and check-in', async () => {
+    const { byId } = await read([
+      assignment('a-1', 'si-fri', 'd-alex', { attendance: { status: 'worked', recorded_at: 'r1' }, driver_check_ins: { checked_in_at: 'c1' } }),
+      assignment('a-2', 'si-fri', 'd-gone', { attendance: { status: 'no_show', recorded_at: 'r2' }, driver_check_ins: null }),
+      assignment('a-9', 'si-fri', 'd-gianni', { attendance: null, driver_check_ins: { checked_in_at: 'c3' } }),
+    ]);
+    expect(byId('a-1')).toMatchObject({ attendance: { status: 'worked' }, checkIn: { checkedInAt: 'c1' } });
+    expect(byId('a-2')).toMatchObject({ attendance: { status: 'no_show' }, checkIn: null });
+    expect(byId('a-9')).toMatchObject({ attendance: null, checkIn: { checkedInAt: 'c3' } });
+  });
+
+  it('11. several shifts on the same day are independent (the same driver can be checked in on one and not the other)', async () => {
+    const tables = standardTables();
+    tables.shift_instances.push(shiftRow('si-fri-lunch', { date: '2030-01-11', name: 'Lunch', sort_order: 0, start_time: '12:00:00', end_time: '14:00:00' }));
+    const { byId } = await read(
+      [
+        assignment('a-lunch', 'si-fri-lunch', 'd-alex', { attendance: { status: 'worked', recorded_at: 'r' }, driver_check_ins: { checked_in_at: 'c-lunch' } }),
+        assignment('a-dinner', 'si-fri', 'd-alex', { attendance: null, driver_check_ins: null }),
+      ],
+      tables
+    );
+    expect(byId('a-lunch')).toMatchObject({ attendance: { status: 'worked' }, checkIn: { checkedInAt: 'c-lunch' } });
+    expect(byId('a-dinner')).toMatchObject({ attendance: null, checkIn: null });
+  });
+
+  it('12-13. the query count is CONSTANT: 5 reads however many assignments there are, attendance and check-in embedded in the assignments read (no N+1)', async () => {
+    const few = await read([assignment('a-1', 'si-fri', 'd-alex')]);
+    const many = await read(
+      Array.from({ length: 40 }, (_, i) => assignment(`a-${i}`, i % 2 ? 'si-fri' : 'si-mon', `d-${i}`, { attendance: { status: 'worked', recorded_at: 'r' }, driver_check_ins: { checked_in_at: 'c' } }))
+    );
+    expect(few.fake.queries.map((q) => q.table).sort()).toEqual(['availability', 'drivers', 'rota_assignments', 'rota_publications', 'shift_instances']);
+    expect(many.fake.queries).toHaveLength(few.fake.queries.length);
+    expect(many.fake.queries.some((q) => q.table === 'attendance' || q.table === 'driver_check_ins')).toBe(false);
+    const assignmentsQuery = many.fake.queries.find((q) => q.table === 'rota_assignments')!;
+    expect(assignmentsQuery.select).toContain('attendance(status, recorded_at)');
+    expect(assignmentsQuery.select).toContain('driver_check_ins(checked_in_at)');
+    expect(many.fake.writes).toEqual([]);
+  });
+
+  it('a week with no shifts still skips the second stage entirely (3 reads)', async () => {
+    const fake = createFakeClient({ ...standardTables(), shift_instances: [] });
+    await new SupabaseRotaRepository(fake.client).getManagerWeekRota({ resortId: RESORT, weekStart: WEEK });
+    expect(fake.queries).toHaveLength(3);
+  });
+
+  it('14. every existing assignment, availability and source field is unchanged, and no audit / actor data appears', async () => {
+    const { rota } = await read(standardTables().rota_assignments.map((a) => ({ ...a, attendance: null, driver_check_ins: null })));
+    const fri = rota.shifts.find((s) => s.shiftInstanceId === 'si-fri')!;
+    expect(fri.assignments[0]).toEqual({
+      assignmentId: 'a-1', driverId: 'd-alex', driverName: 'Alex', isDriverActive: true, source: 'manual', assignedAt: '2030-01-01T10:00:00Z', attendance: null, checkIn: null,
+    });
+    expect(fri.availabilityByDriver).toMatchObject({ 'd-alex': 'available', 'd-tomas': 'unavailable' });
+    expect(JSON.stringify(rota)).not.toMatch(/secret-manager-id|recorded_by|assigned_by/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AT-B: the driver's own rota carries the assignment id, their OWN check-in and the server-computed window
+// ---------------------------------------------------------------------------
+
+describe('SupabaseRotaRepository.getDriverWeekRota: check-in state and window', () => {
+  const read = async (assignments: Row[], publications: Row[] = [publicationRow()]) => {
+    const fake = createFakeClient({ driver_visible_week_publications: publications, driver_visible_assignments: assignments });
+    return { fake, rota: await new SupabaseRotaRepository(fake.client).getDriverWeekRota({ weekStart: DRIVER_WEEK, driverId: 'ignored' }) };
+  };
+
+  it('1. maps the assignment id (what the future Check in button sends)', async () => {
+    const { rota } = await read([myAssignmentRow('si-mon')]);
+    expect(rota.shifts[0].assignmentId).toBe('assignment-si-mon');
+  });
+
+  it('2. checkedInAt is null before the driver checks in', async () => {
+    expect((await read([myAssignmentRow('si-mon')])).rota.shifts[0].checkedInAt).toBeNull();
+  });
+
+  it('3. checkedInAt is the driver\'s own timestamp once checked in', async () => {
+    expect((await read([myAssignmentRow('si-mon', { checked_in_at: '2030-01-07T17:42:10+00:00' })])).rota.shifts[0].checkedInAt).toBe('2030-01-07T17:42:10+00:00');
+  });
+
+  it('4-5. the server-computed window passes through untouched (no timezone arithmetic in TypeScript)', async () => {
+    const { rota } = await read([myAssignmentRow('si-mon', { check_in_opens_at: '2030-01-07T16:30:00+00:00', check_in_closes_at: '2030-01-07T20:30:00+00:00' })]);
+    expect(rota.shifts[0]).toMatchObject({ checkInOpensAt: '2030-01-07T16:30:00+00:00', checkInClosesAt: '2030-01-07T20:30:00+00:00' });
+  });
+
+  it('6. several shifts each carry their OWN check-in state and window (Lunch checked in, Dinner not)', async () => {
+    const { rota } = await read([
+      myAssignmentRow('si-lunch', { date: '2030-01-07', name: 'Lunch', start_time: '12:00:00', end_time: '14:00:00', checked_in_at: '2030-01-07T11:20:00+00:00', check_in_opens_at: '2030-01-07T10:30:00+00:00', check_in_closes_at: '2030-01-07T13:00:00+00:00' }),
+      myAssignmentRow('si-dinner'),
+    ]);
+    expect(rota.shifts.map((s) => [s.shiftName, s.checkedInAt, s.checkInOpensAt])).toEqual([
+      ['Lunch', '2030-01-07T11:20:00+00:00', '2030-01-07T10:30:00+00:00'],
+      ['Dinner', null, '2030-01-07T16:30:00+00:00'],
+    ]);
+  });
+
+  it('7-8. unpublished semantics and "published, nothing for me" are unchanged, and an unpublished week never carries check-in data', async () => {
+    expect((await read([myAssignmentRow('si-mon', { checked_in_at: 'x' })], [])).rota).toEqual({ weekStart: DRIVER_WEEK, isPublished: false, shifts: [] });
+    expect((await read([])).rota).toEqual({ weekStart: DRIVER_WEEK, isPublished: true, shifts: [] });
+  });
+
+  it('9-10. no attendance and no colleague data can reach the driver, even if a row carried extra columns', async () => {
+    const { rota } = await read([
+      myAssignmentRow('si-mon', { status: 'no_show', attendance_status: 'worked', recorded_at: 'r', driver_id: 'd-other', full_name: 'Colleague', colleague_checked_in_at: 'c' }),
+    ]);
+    const json = JSON.stringify(rota);
+    expect(json).not.toMatch(/no_show|attendance|recorded_at|d-other|Colleague|colleague/);
+    expect(Object.keys(rota.shifts[0]).some((k) => /status|attendance|driver|colleague/i.test(k))).toBe(false);
+  });
+
+  it('a row without its server-computed window is a contract break, not a guess', async () => {
+    const fake = createFakeClient({
+      driver_visible_week_publications: [publicationRow()],
+      driver_visible_assignments: [myAssignmentRow('si-mon', { check_in_opens_at: null, check_in_closes_at: null })],
+    });
+    const error = await new SupabaseRotaRepository(fake.client).getDriverWeekRota({ weekStart: DRIVER_WEEK, driverId: 'x' }).catch((e) => e);
+    expect(error).toBeInstanceOf(RepositoryError);
+  });
+
+  it('still reads exactly the two driver-safe views and sends no driver id', async () => {
+    const { fake } = await read([myAssignmentRow('si-mon')]);
+    expect(fake.queries.map((q) => q.table).sort()).toEqual(['driver_visible_assignments', 'driver_visible_week_publications']);
+    expect(JSON.stringify(fake.queries)).not.toContain('ignored');
   });
 });

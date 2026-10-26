@@ -17,6 +17,8 @@ import type {
   ManagerWeekRota,
   RotaAssignmentSource,
   RotaAvailabilityState,
+  ManagerRotaAttendance,
+  ManagerRotaCheckIn,
   ShiftInstanceRecord,
 } from './domain';
 
@@ -32,6 +34,10 @@ export interface RotaBuildAssignment {
   driverId: string;
   source: RotaAssignmentSource;
   assignedAt: string;
+  /** Final attendance for this assignment; absent / null = Not recorded. */
+  attendance?: ManagerRotaAttendance | null;
+  /** The driver's check-in evidence; absent / null = Not checked in. */
+  checkIn?: ManagerRotaCheckIn | null;
 }
 
 export interface RotaBuildAvailability {
@@ -106,6 +112,8 @@ export function buildManagerWeekRota(input: ManagerRotaBuildInput): ManagerWeekR
         isDriverActive: driver?.isActive ?? false,
         source: row.source,
         assignedAt: row.assignedAt,
+        attendance: row.attendance ?? null,
+        checkIn: row.checkIn ?? null,
       });
     }
     assignments.sort(

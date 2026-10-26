@@ -11,7 +11,9 @@
  * In-memory only; mutations reset on page reload.
  */
 
+import { setMockActingDriver } from './session';
 import type {
+  AttendanceStatus,
   AvailabilityAnswer,
   DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
@@ -196,6 +198,51 @@ export interface MockRotaAssignment {
 }
 export const mockRotaAssignments: MockRotaAssignment[] = [];
 
+/**
+ * Attendance (AT-B): mirrors the `attendance` table as the manager sees it. One row per rota
+ * ASSIGNMENT; NO row = Not recorded (there is no pending status). Written only by
+ * MockRotaRepository.recordAttendance / clearAttendance. The optional reason is audit-only in the
+ * real database, so the mock keeps none.
+ */
+export interface MockAttendance {
+  id: string;
+  assignmentId: string;
+  status: AttendanceStatus;
+  recordedAt: string;
+  updatedAt: string;
+}
+export const mockAttendance: MockAttendance[] = [];
+
+/**
+ * Driver check-ins (AT-B): mirrors `driver_check_ins`. One immutable row per assignment,
+ * written only by MockRotaRepository.checkInToShift with the mock clock. The assignment already
+ * identifies driver, shift and resort, so none is duplicated here.
+ */
+export interface MockDriverCheckIn {
+  id: string;
+  assignmentId: string;
+  checkedInAt: string;
+}
+export const mockDriverCheckIns: MockDriverCheckIn[] = [];
+
+/**
+ * Shift instance ids to treat as CANCELLED. Mock shift instances are generated fresh from active
+ * templates and are always active, so a test that needs the cancelled-shift rules adds the id here
+ * (the mock analogue of shift_instances.status = 'cancelled'). Empty by default.
+ */
+export const mockCancelledShiftInstanceIds = new Set<string>();
+
+let mockAttendanceSeq = 0;
+export function nextMockAttendanceId(): string {
+  mockAttendanceSeq += 1;
+  return `mock-attendance-${mockAttendanceSeq}`;
+}
+let mockCheckInSeq = 0;
+export function nextMockCheckInId(): string {
+  mockCheckInSeq += 1;
+  return `mock-check-in-${mockCheckInSeq}`;
+}
+
 let mockRotaAssignmentSeq = 0;
 export function nextMockRotaAssignmentId(): string {
   mockRotaAssignmentSeq += 1;
@@ -279,4 +326,8 @@ export function resetMockFixturesForTesting(): void {
   mockAvailabilitySubmissions.length = 0;
   mockRotaPublications.length = 0;
   mockRotaAssignments.length = 0;
+  mockAttendance.length = 0;
+  mockDriverCheckIns.length = 0;
+  mockCancelledShiftInstanceIds.clear();
+  setMockActingDriver(null);
 }

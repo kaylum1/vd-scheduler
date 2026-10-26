@@ -1548,3 +1548,70 @@ Rota, `55006` + `check_in_recorded` on unassign.
 **Deferred / not built:** repository, mock, read models and UI (AT-B, AT-C1 driver, AT-C2
 manager), any lateness display or policy, check-out, a manager correction of a check-in,
 location evidence, notifications, payroll calculation.
+
+## V. Attendance and Driver Check-in — repository, errors, mock and read models (AT-B) — NO UI yet
+
+**Status: the application contracts exist (AT-B); there is NO Check-in button / timer and
+NO manager Attendance or Check-in UI yet (AT-C1 driver, AT-C2 manager), and neither
+feature is complete.** No database change: AT-B only exposes the AT-A / AT-A2 contracts.
+
+**Repository (`RotaRepository`, both providers).**
+- `recordAttendance({ assignmentId, status, reason? }) → AttendanceMutationResult
+  { record, created, changed }` and `clearAttendance({ assignmentId, reason }) →
+  ClearAttendanceResult { assignmentId, previousStatus | null, changed }` (manager).
+  `AttendanceStatus` is exactly `worked | no_show | excused | cancelled`; `cancelled`
+  means THIS driver was stood down (UI: "Cancelled (stood down)"), never a cancelled
+  shift. First record: `created + changed`; correction: `!created + changed`; same status
+  again: `!created + !changed`.
+- `checkInToShift({ assignmentId }) → DriverCheckInResult { checkIn, created }` (driver).
+  The client supplies ONLY the assignment: never a driver id, a time, a resort or a
+  week. A repeat is `created: false` with the original id and timestamp. Check-in is
+  evidence only: no attendance status, no pay field, no lateness field.
+- The Supabase provider makes exactly ONE RPC per call (`record_attendance`,
+  `clear_attendance`, `check_in_to_shift`), never writes `attendance` or
+  `driver_check_ins`, and decides nothing (publication, the shift date vs the resort's
+  operational today, the historical-backfill reason, the check-in window, ownership and
+  every guard are the database's). A malformed or self-contradictory result row fails
+  safely as a repository contract error.
+
+**Typed errors (React shows `userMessage` and never inspects codes).**
+`AttendanceError`: `assignment_not_found`, `week_not_published`, `future_shift`,
+`shift_cancelled`, `invalid_status`, `invalid_request`,
+`historical_backfill_reason_required`, `reason_required`, `reason_too_long`,
+`permission_denied`, `unknown`. `DriverCheckInError`: `assignment_not_found`,
+`week_not_published`, `shift_cancelled`, `check_in_too_early`, `check_in_closed`,
+`attendance_already_recorded`, `invalid_request`, `permission_denied`, `unknown` — with
+privacy-safe driver copy (a driver is never told that final attendance exists, or that a
+week is a draft or cancelled: those read "Check-in isn't available for this shift"), and
+no "not your assignment" kind because the database hides ownership. Every SQLSTATE +
+DETAIL pair is pinned independently in `supabase/rotaErrors.ts`; an unexpected DETAIL is
+`unknown`, and nothing is inferred from message text. Manual Rota: `55006 +
+check_in_recorded` on unassign is its own `RotaAssignmentError` kind with its own copy
+("This driver has already checked in, so this assignment can't be removed.") and is never
+merged with `attendance_recorded`.
+
+**Read models.** Each `ManagerRotaAssignment` now carries `attendance { status,
+recordedAt } | null` (null = Not recorded) and `checkIn { checkedInAt } | null` (null = Not
+checked in), read by EMBEDDING `attendance(...)` and `driver_check_ins(...)` in the existing
+assignments query: the manager week is still a constant 5 table reads (3 for a week with
+no shifts), never a query per assignment. Each `DriverRotaShift` now carries
+`assignmentId`, the driver's OWN `checkedInAt | null`, and the server-computed
+`checkInOpensAt` / `checkInClosesAt` (no timezone arithmetic in TypeScript); a driver never
+receives attendance or a colleague's check-in.
+
+**Mock parity.** Shared state `mockAttendance` and `mockDriverCheckIns` (one row per
+assignment, cleared by `resetMockFixturesForTesting`), a single mock clock (the faked
+`Date`, `mock/clock.ts`), and the same guards, order and typed errors as the database for
+`recordAttendance`, `clearAttendance`, `checkInToShift` (inclusive 30-minutes-before-start
+to scheduled-end window in the resort timezone, mock-only arithmetic in
+`mock/checkInWindow.ts` checked against the database's own DST instants; an existing
+check-in is returned before the window and attendance gates) and the unassign guard
+(attendance → `attendance_recorded`, else a check-in → `check_in_recorded`). The mock has no
+session, so `checkInToShift` reads the acting driver from `mock/session.ts`
+(`setMockActingDriver`); **the Driver Check-in UI (AT-C1) must set it from the mock identity
+bridge.** Mock shift instances are never cancelled unless a test marks the id in
+`mockCancelledShiftInstanceIds`.
+
+**Not built:** the Check in button and window states (AT-C1), the manager Attendance /
+Check-in evidence UI and dialogs (AT-C2), end-to-end verification and the HANDOFF rewrite
+(AT-D), payroll calculation.

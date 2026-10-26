@@ -34,6 +34,12 @@ import type {
   DriverShiftAvailability,
   AssignDriverParams,
   AssignDriverResult,
+  AttendanceMutationResult,
+  CheckInToShiftParams,
+  ClearAttendanceParams,
+  ClearAttendanceResult,
+  DriverCheckInResult,
+  RecordAttendanceParams,
   DriverWeekRota,
   AutoRotaResult,
   GenerateAutoRotaParams,
@@ -351,6 +357,34 @@ export interface RotaRepository {
    * resort_inactive, ...). There is no unpublish in V1.
    */
   publishRota(params: PublishRotaParams): Promise<PublishRotaResult>;
+
+  /**
+   * Manager-only. Records (first time) or corrects (in place) the FINAL attendance of one
+   * assignment through the single authoritative record_attendance call. Every rule -- the
+   * shift date vs the resort's operational today, today needing a published week, a past
+   * unpublished week needing a reason (a historical backfill), cancelled shifts, the
+   * same-status no-op -- is the database's and arrives as a typed AttendanceError; nothing
+   * is decided or calculated here. The result says whether a row was `created` and whether
+   * anything `changed`. Check-in is evidence only: it never creates attendance.
+   */
+  recordAttendance(params: RecordAttendanceParams): Promise<AttendanceMutationResult>;
+
+  /**
+   * Manager-only correction: returns one assignment to "Not recorded" (clear_attendance;
+   * a reason is required). Already clear is a success with `changed: false`. Never touches
+   * the assignment, the publication or the driver's check-in evidence.
+   */
+  clearAttendance(params: ClearAttendanceParams): Promise<ClearAttendanceResult>;
+
+  /**
+   * Driver-only. Records the calling driver's check-in on their OWN assignment with the
+   * SERVER time (check_in_to_shift). The caller supplies only the assignment: never a
+   * driver id or a time. A repeat returns the original check-in (`created: false`).
+   * Evidence only -- it never creates attendance and proves no location. Failures are
+   * typed DriverCheckInErrors with privacy-safe copy (a driver is never told the final
+   * attendance state).
+   */
+  checkInToShift(params: CheckInToShiftParams): Promise<DriverCheckInResult>;
 
   /**
    * Atomic (unassign_driver). Removes exactly one assignment. Rejected: not

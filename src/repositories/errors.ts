@@ -116,6 +116,7 @@ export type RotaAssignmentErrorKind =
   | 'duplicate_assignment'
   | 'historical_shift'
   | 'attendance_recorded'
+  | 'check_in_recorded'
   | 'rule_violation'
   | 'not_found'
   | 'assignment_not_found';
@@ -263,4 +264,112 @@ export class PublishRotaError extends RepositoryError {
 
 export function isPublishRotaError(error: unknown, kind?: PublishRotaErrorKind): error is PublishRotaError {
   return error instanceof PublishRotaError && (kind === undefined || error.kind === kind);
+}
+
+// ---------------------------------------------------------------------
+// Attendance (AT-B): typed manager errors for record_attendance / clear_attendance.
+//
+// The Supabase adapter translates SQLSTATE / DETAIL (repositories/supabase/
+// rotaErrors.ts) and the mock throws the same class, so UI code behaves
+// identically on both. Callers show `userMessage` and never inspect codes.
+// ---------------------------------------------------------------------
+
+export type AttendanceErrorKind =
+  | 'assignment_not_found'
+  | 'week_not_published'
+  | 'future_shift'
+  | 'shift_cancelled'
+  | 'invalid_status'
+  | 'invalid_request'
+  | 'historical_backfill_reason_required'
+  | 'reason_required'
+  | 'reason_too_long'
+  | 'permission_denied'
+  | 'unknown';
+
+const ATTENDANCE_MESSAGES: Record<AttendanceErrorKind, string> = {
+  assignment_not_found: 'This assignment could not be found.',
+  week_not_published: 'Publish this rota before recording attendance for today.',
+  future_shift: 'Attendance can’t be recorded before the shift date.',
+  shift_cancelled: 'Attendance can’t be recorded for a cancelled shift.',
+  invalid_status: 'That attendance status is invalid.',
+  invalid_request: 'That attendance request is invalid.',
+  historical_backfill_reason_required: 'Add a reason to record attendance for an unpublished past shift.',
+  reason_required: 'Add a reason to clear attendance.',
+  reason_too_long: 'Keep the reason to 500 characters or fewer.',
+  permission_denied: 'You don’t have permission to change attendance.',
+  unknown: 'Couldn’t update attendance. Please try again.',
+};
+
+export class AttendanceError extends RepositoryError {
+  readonly kind: AttendanceErrorKind;
+
+  constructor(kind: AttendanceErrorKind, options: { operation: string; code?: string; cause?: unknown }) {
+    super(`${options.operation} failed: ${kind}`, options);
+    this.name = 'AttendanceError';
+    this.kind = kind;
+  }
+
+  /** First-party, manager-facing copy. Never DB text, SQLSTATEs or DETAIL tokens. */
+  override get userMessage(): string {
+    return ATTENDANCE_MESSAGES[this.kind];
+  }
+}
+
+export function isAttendanceError(error: unknown, kind?: AttendanceErrorKind): error is AttendanceError {
+  return error instanceof AttendanceError && (kind === undefined || error.kind === kind);
+}
+
+// ---------------------------------------------------------------------
+// Driver Check-in (AT-B): typed driver errors for check_in_to_shift.
+//
+// The copy is deliberately privacy-safe: a driver is never told that final
+// attendance exists, that a week is a draft, or that a shift was cancelled --
+// those all read "Check-in isn't available for this shift". There is no
+// "not your assignment" kind: the database hides ownership (someone else's
+// assignment is indistinguishable from a missing one).
+// ---------------------------------------------------------------------
+
+export type DriverCheckInErrorKind =
+  | 'assignment_not_found'
+  | 'week_not_published'
+  | 'shift_cancelled'
+  | 'check_in_too_early'
+  | 'check_in_closed'
+  | 'attendance_already_recorded'
+  | 'invalid_request'
+  | 'permission_denied'
+  | 'unknown';
+
+const CHECK_IN_UNAVAILABLE = 'Check-in isn’t available for this shift.';
+
+const DRIVER_CHECK_IN_MESSAGES: Record<DriverCheckInErrorKind, string> = {
+  assignment_not_found: CHECK_IN_UNAVAILABLE,
+  week_not_published: CHECK_IN_UNAVAILABLE,
+  shift_cancelled: CHECK_IN_UNAVAILABLE,
+  check_in_too_early: 'Check-in isn’t open for this shift yet.',
+  check_in_closed: 'The check-in window for this shift has closed.',
+  attendance_already_recorded: CHECK_IN_UNAVAILABLE,
+  invalid_request: 'Couldn’t check in. Please try again.',
+  permission_denied: 'You can’t check in to this shift.',
+  unknown: 'Couldn’t check in. Please try again.',
+};
+
+export class DriverCheckInError extends RepositoryError {
+  readonly kind: DriverCheckInErrorKind;
+
+  constructor(kind: DriverCheckInErrorKind, options: { operation: string; code?: string; cause?: unknown }) {
+    super(`${options.operation} failed: ${kind}`, options);
+    this.name = 'DriverCheckInError';
+    this.kind = kind;
+  }
+
+  /** First-party, driver-facing copy. Never DB text, SQLSTATEs, DETAIL tokens or manager attendance state. */
+  override get userMessage(): string {
+    return DRIVER_CHECK_IN_MESSAGES[this.kind];
+  }
+}
+
+export function isDriverCheckInError(error: unknown, kind?: DriverCheckInErrorKind): error is DriverCheckInError {
+  return error instanceof DriverCheckInError && (kind === undefined || error.kind === kind);
 }

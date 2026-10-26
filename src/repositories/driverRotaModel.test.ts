@@ -14,6 +14,9 @@ const row = (id: string, over: Partial<DriverVisibleAssignment> = {}): DriverVis
   name: 'Dinner',
   startTime: '18:00:00',
   endTime: '21:30:00',
+  checkedInAt: null,
+  checkInOpensAt: '2030-01-07T16:30:00+00:00',
+  checkInClosesAt: '2030-01-07T20:30:00+00:00',
   ...over,
 });
 
@@ -76,8 +79,43 @@ describe('buildDriverWeekRota', () => {
   it('5. the result carries exactly the driver-safe fields -- no manager, colleague, headcount, source, pay or audit data can exist on it', () => {
     const rota = buildDriverWeekRota({ weekStart: WEEK, isPublished: true, assignments: [row('a')] });
     expect(Object.keys(rota).sort()).toEqual(['isPublished', 'shifts', 'weekStart']);
-    expect(Object.keys(rota.shifts[0]).sort()).toEqual(['date', 'endTime', 'shiftInstanceId', 'shiftName', 'startTime']);
-    // Internal identifiers of the underlying assignment/resort are not forwarded either.
-    expect(JSON.stringify(rota)).not.toMatch(/assignment-a|resort-1|dinner"/);
+    // The driver's own assignment id (what a check-in sends), their OWN check-in time and the server-computed window: nothing else.
+    expect(Object.keys(rota.shifts[0]).sort()).toEqual([
+      'assignmentId', 'checkInClosesAt', 'checkInOpensAt', 'checkedInAt', 'date', 'endTime', 'shiftInstanceId', 'shiftName', 'startTime',
+    ]);
+    // The resort / shift key of the underlying row are not forwarded, and there is no attendance, driver or colleague field.
+    expect(JSON.stringify(rota)).not.toMatch(/resort-1|dinner"/);
+    expect(Object.keys(rota.shifts[0]).some((k) => /status|attendance|driver|colleague|source/i.test(k))).toBe(false);
+  });
+
+  it('6. the check-in fields pass through untouched: assignment id, own check-in time (or null) and the server-computed window', () => {
+    const rota = buildDriverWeekRota({
+      weekStart: WEEK,
+      isPublished: true,
+      assignments: [
+        row('a', { checkedInAt: '2030-01-07T17:42:10+00:00' }),
+        row('b', { date: '2030-01-08', checkInOpensAt: '2030-01-08T16:30:00+00:00', checkInClosesAt: '2030-01-08T20:30:00+00:00' }),
+      ],
+    });
+    expect(rota.shifts[0]).toMatchObject({
+      assignmentId: 'assignment-a',
+      checkedInAt: '2030-01-07T17:42:10+00:00',
+      checkInOpensAt: '2030-01-07T16:30:00+00:00',
+      checkInClosesAt: '2030-01-07T20:30:00+00:00',
+    });
+    expect(rota.shifts[1]).toMatchObject({
+      assignmentId: 'assignment-b',
+      checkedInAt: null,
+      checkInOpensAt: '2030-01-08T16:30:00+00:00',
+      checkInClosesAt: '2030-01-08T20:30:00+00:00',
+    });
+  });
+
+  it('7. an unpublished week still shows no shifts and therefore no check-in data', () => {
+    expect(buildDriverWeekRota({ weekStart: WEEK, isPublished: false, assignments: [row('a', { checkedInAt: '2030-01-07T17:42:10+00:00' })] })).toEqual({
+      weekStart: WEEK,
+      isPublished: false,
+      shifts: [],
+    });
   });
 });

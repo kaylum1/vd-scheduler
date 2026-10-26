@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AttendanceError,
+  DriverCheckInError,
+  isAttendanceError,
+  isDriverCheckInError,
+  type AttendanceErrorKind,
+  type DriverCheckInErrorKind,
   AutoRotaError,
   AvailabilityOverrideRequiredError,
   PublishRotaConfirmationRequiredError,
@@ -12,7 +18,7 @@ import {
   isRotaAssignmentError,
   type PostgrestLikeError,
 } from '../errors';
-import { mapAutoRotaRpcError, mapPublishRotaRpcError, mapRotaRpcError } from './rotaErrors';
+import { mapAttendanceRpcError, mapAutoRotaRpcError, mapCheckInRpcError, mapPublishRotaRpcError, mapRotaRpcError } from './rotaErrors';
 
 const err = (code: string, details: string | null, message = 'db message'): PostgrestLikeError => ({ code, details, hint: null, message });
 
@@ -243,5 +249,134 @@ describe('mapPublishRotaRpcError (publish_rota, PB-A contract)', () => {
       expect(map('VD003', '2').operation).toBe('rota.publishRota');
       expect(map('42501', null).operation).toBe('rota.publishRota');
     });
+  });
+});
+
+describe('mapRotaRpcError: attendance and check-in guards on unassign stay DISTINCT', () => {
+  it('55006 + attendance_recorded -> the existing attendance kind (unchanged)', () => {
+    const e = mapRotaRpcError('rota.unassignDriver', err('55006', 'attendance_recorded'));
+    expect(isRotaAssignmentError(e, 'attendance_recorded')).toBe(true);
+    expect(isRotaAssignmentError(e, 'check_in_recorded')).toBe(false);
+  });
+
+  it('55006 + check_in_recorded -> the NEW check-in kind, never merged with attendance', () => {
+    const e = mapRotaRpcError('rota.unassignDriver', err('55006', 'check_in_recorded'));
+    expect(isRotaAssignmentError(e, 'check_in_recorded')).toBe(true);
+    expect(isRotaAssignmentError(e, 'attendance_recorded')).toBe(false);
+    expect(e.code).toBe('55006');
+  });
+
+  it.each([[null], ['CHECK_IN_RECORDED'], ['check_in'], ['check_in_recorded '], ['historical_week'], ['']])(
+    '55006 with an unexpected DETAIL (%j) is the generic error, not a known kind',
+    (details) => {
+      const e = mapRotaRpcError('rota.unassignDriver', err('55006', details));
+      expect(isRotaAssignmentError(e)).toBe(false);
+      expect(e).toBeInstanceOf(RepositoryError);
+    }
+  );
+
+  it('never infers the kind from the message text', () => {
+    const e = mapRotaRpcError('rota.unassignDriver', err('55006', null, 'This driver has already checked in to this shift'));
+    expect(isRotaAssignmentError(e)).toBe(false);
+  });
+});
+
+describe('mapAttendanceRpcError (record_attendance / clear_attendance, AT-A contract)', () => {
+  const map = (code: string, details: string | null, message = 'db message') => mapAttendanceRpcError('rota.recordAttendance', err(code, details, message));
+
+  it.each([
+    ['42501', null, 'permission_denied'],
+    ['22023', 'invalid_status', 'invalid_status'],
+    ['22023', null, 'invalid_request'],
+    ['P0002', null, 'assignment_not_found'],
+    ['55006', 'week_not_published', 'week_not_published'],
+    ['55006', 'future_shift', 'future_shift'],
+    ['55006', 'shift_cancelled', 'shift_cancelled'],
+    ['23514', 'historical_backfill_reason_required', 'historical_backfill_reason_required'],
+    ['23514', 'reason_required', 'reason_required'],
+    ['23514', 'reason_too_long', 'reason_too_long'],
+  ])('%s + DETAIL %j -> %s', (code, details, kind) => {
+    const e = map(code, details);
+    expect(e).toBeInstanceOf(AttendanceError);
+    expect(isAttendanceError(e, kind as AttendanceErrorKind)).toBe(true);
+    expect(e.code).toBe(code);
+    expect(e.operation).toBe('rota.recordAttendance');
+  });
+
+  it.each([
+    ['22023', 'plan_malformed'], ['22023', ''],
+    ['55006', null], ['55006', 'historical_week'], ['55006', 'check_in_closed'], ['55006', 'attendance_recorded'], ['55006', 'WEEK_NOT_PUBLISHED'],
+    ['23514', null], ['23514', 'no_shifts'], ['23514', 'resort_inactive'],
+    ['VD001', 'unavailable'], ['VD003', '2'], ['23505', null], ['XX000', null], ['PGRST301', null], ['', null],
+  ])('%s + unexpected DETAIL %j -> unknown (never mistaken for a known outcome)', (code, details) => {
+    expect(isAttendanceError(map(code, details), 'unknown')).toBe(true);
+  });
+
+  it('does not guess from the message text, and keeps the cause but never shows it', () => {
+    expect(isAttendanceError(map('55006', null, 'This shift hasn\'t started yet. future_shift'), 'unknown')).toBe(true);
+    const e = map('55006', 'future_shift', 'raw db text attendance_assignment_fk');
+    expect(e.cause).toMatchObject({ code: '55006', details: 'future_shift' });
+    expect(e.userMessage).toBe('Attendance can’t be recorded before the shift date.');
+    expect(e.userMessage).not.toMatch(/55006|attendance_assignment_fk|future_shift/);
+  });
+
+  it.each([
+    ['assignment_not_found', 'This assignment could not be found.'],
+    ['week_not_published', 'Publish this rota before recording attendance for today.'],
+    ['future_shift', 'Attendance can’t be recorded before the shift date.'],
+    ['shift_cancelled', 'Attendance can’t be recorded for a cancelled shift.'],
+    ['invalid_status', 'That attendance status is invalid.'],
+    ['historical_backfill_reason_required', 'Add a reason to record attendance for an unpublished past shift.'],
+    ['reason_required', 'Add a reason to clear attendance.'],
+    ['reason_too_long', 'Keep the reason to 500 characters or fewer.'],
+    ['permission_denied', 'You don’t have permission to change attendance.'],
+    ['unknown', 'Couldn’t update attendance. Please try again.'],
+  ])('first-party manager copy for %s', (kind, message) => {
+    expect(new AttendanceError(kind as AttendanceErrorKind, { operation: 'x' }).userMessage).toBe(message);
+  });
+});
+
+describe('mapCheckInRpcError (check_in_to_shift, AT-A2 contract)', () => {
+  const map = (code: string, details: string | null, message = 'db message') => mapCheckInRpcError('rota.checkInToShift', err(code, details, message));
+
+  it.each([
+    ['42501', null, 'permission_denied'],
+    ['22023', null, 'invalid_request'],
+    ['P0002', null, 'assignment_not_found'],
+    ['55006', 'week_not_published', 'week_not_published'],
+    ['55006', 'shift_cancelled', 'shift_cancelled'],
+    ['55006', 'check_in_too_early', 'check_in_too_early'],
+    ['55006', 'check_in_closed', 'check_in_closed'],
+    ['55006', 'attendance_already_recorded', 'attendance_already_recorded'],
+  ])('%s + DETAIL %j -> %s', (code, details, kind) => {
+    const e = map(code, details);
+    expect(e).toBeInstanceOf(DriverCheckInError);
+    expect(isDriverCheckInError(e, kind as DriverCheckInErrorKind)).toBe(true);
+  });
+
+  it.each([
+    ['22023', 'invalid_status'], ['55006', null], ['55006', 'future_shift'], ['55006', 'check_in_recorded'], ['55006', 'historical_week'],
+    ['55006', 'CHECK_IN_CLOSED'], ['23514', 'reason_required'], ['23514', null], ['VD003', '1'], ['XX000', null], ['', null],
+  ])('%s + unexpected DETAIL %j -> unknown', (code, details) => {
+    expect(isDriverCheckInError(map(code, details), 'unknown')).toBe(true);
+  });
+
+  it('has NO not_your_assignment outcome (ownership is hidden) and never reads the message', () => {
+    expect(isDriverCheckInError(map('P0002', null, 'not your assignment'), 'assignment_not_found')).toBe(true);
+    expect(isDriverCheckInError(map('55006', null, 'check_in_closed'), 'unknown')).toBe(true);
+  });
+
+  it.each([
+    ['assignment_not_found', 'Check-in isn’t available for this shift.'],
+    ['week_not_published', 'Check-in isn’t available for this shift.'],
+    ['shift_cancelled', 'Check-in isn’t available for this shift.'],
+    ['attendance_already_recorded', 'Check-in isn’t available for this shift.'],
+    ['check_in_too_early', 'Check-in isn’t open for this shift yet.'],
+    ['check_in_closed', 'The check-in window for this shift has closed.'],
+    ['permission_denied', 'You can’t check in to this shift.'],
+    ['invalid_request', 'Couldn’t check in. Please try again.'],
+    ['unknown', 'Couldn’t check in. Please try again.'],
+  ])('privacy-safe driver copy for %s', (kind, message) => {
+    expect(new DriverCheckInError(kind as DriverCheckInErrorKind, { operation: 'x' }).userMessage).toBe(message);
   });
 });

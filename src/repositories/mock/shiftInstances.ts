@@ -7,7 +7,7 @@
 
 import { addDays, parseISODate, toISODate } from '../../mock-data/date-utils';
 import type { ShiftInstanceRecord } from '../domain';
-import { mockShiftTemplates, mockShiftTypes } from './fixtures';
+import { mockCancelledShiftInstanceIds, mockShiftTemplates, mockShiftTypes } from './fixtures';
 
 export function generateMockShiftInstancesForWeek(resortId: string, weekStart: string): ShiftInstanceRecord[] {
   const templates = mockShiftTemplates.filter((t) => t.resortId === resortId && t.isActive);
@@ -45,7 +45,8 @@ export function generateMockShiftInstancesForWeek(resortId: string, weekStart: s
         // template created through today's repository methods).
         requiredDrivers: template.requiredDrivers ?? 1,
         isPremium: template.isPremium,
-        status: 'active',
+        // Always active unless a test marks the id cancelled (the mock analogue of shift_instances.status).
+        status: mockCancelledShiftInstanceIds.has(`${template.id}-${date}`) ? 'cancelled' : 'active',
         origin: 'template',
       });
     }

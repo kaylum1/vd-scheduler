@@ -45,6 +45,8 @@ function shift(spec: ShiftSpec, candidates: string[]): ManagerRotaShift {
       isDriverActive: a.active ?? true,
       source: a.source ?? 'manual',
       assignedAt: `2030-01-01T10:00:0${i}.000Z`,
+      attendance: null,
+      checkIn: null,
     })),
     availabilityByDriver: Object.fromEntries(candidates.map((d) => [d, spec.avail?.[d] ?? 'not_submitted'])),
   };
@@ -74,7 +76,7 @@ function applied(w: ManagerWeekRota, p: AutoRotaPlan): ManagerWeekRota {
         ...s.assignments,
         ...p.assignments
           .filter((a) => a.shiftInstanceId === s.shiftInstanceId)
-          .map((a, i) => ({ assignmentId: `new-${s.shiftInstanceId}-${i}`, driverId: a.driverId, driverName: a.driverId, isDriverActive: true, source: 'auto' as const, assignedAt: '2030-01-02T00:00:00.000Z' })),
+          .map((a, i) => ({ assignmentId: `new-${s.shiftInstanceId}-${i}`, driverId: a.driverId, driverName: a.driverId, isDriverActive: true, source: 'auto' as const, assignedAt: '2030-01-02T00:00:00.000Z', attendance: null, checkIn: null })),
       ],
     })),
   };

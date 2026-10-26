@@ -342,7 +342,20 @@ describe('MockRotaRepository.getDriverWeekRota', () => {
     expect(await myRota()).toEqual({
       weekStart: FUTURE_WEEK,
       isPublished: true,
-      shifts: [{ shiftInstanceId: FUTURE_DINNER, date: FUTURE_WEEK, shiftName: 'Dinner', startTime: '18:00', endTime: '21:30' }],
+      shifts: [
+        {
+          assignmentId: `seed-${FUTURE_DINNER}-mock-gianni`,
+          shiftInstanceId: FUTURE_DINNER,
+          date: FUTURE_WEEK,
+          shiftName: 'Dinner',
+          startTime: '18:00',
+          endTime: '21:30',
+          // Not checked in yet; the Zurich winter window 17:30-21:30 CET = 16:30Z-20:30Z.
+          checkedInAt: null,
+          checkInOpensAt: '2030-01-07T16:30:00.000Z',
+          checkInClosesAt: '2030-01-07T20:30:00.000Z',
+        },
+      ],
     });
   });
 

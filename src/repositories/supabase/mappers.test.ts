@@ -14,6 +14,10 @@ import {
   mapReopenWeekOutcome,
   mapResort,
   mapRotaBuildAssignment,
+  mapAttendanceMutationResult,
+  mapCheckInResult,
+  mapClearAttendanceResult,
+  parseAttendanceStatus,
   mapRotaBuildAvailability,
   mapRotaBuildDriver,
   mapShiftInstance,
@@ -185,13 +189,15 @@ describe('mapDriverVisibleAssignment', () => {
       name: 'Daily',
       start_time: '08:00',
       end_time: '12:00',
-      // The view now also carries the driver's OWN check-in and window (AT-A2); not mapped yet (AT-B).
+      // The driver's OWN check-in and the server-computed window (AT-A2).
       checked_in_at: null,
-      check_in_opens_at: null,
-      check_in_closes_at: null,
+      check_in_opens_at: '2024-01-01T06:30:00+00:00',
+      check_in_closes_at: '2024-01-01T11:00:00+00:00',
     });
     expect(mapped.assignmentId).toBe('a1');
     expect(mapped).not.toHaveProperty('driverId');
+    expect(mapped).toMatchObject({ checkedInAt: null, checkInOpensAt: '2024-01-01T06:30:00+00:00', checkInClosesAt: '2024-01-01T11:00:00+00:00' });
+    expect(Object.keys(mapped).some((k) => /status|attendance/i.test(k))).toBe(false);
   });
 });
 
@@ -378,7 +384,7 @@ describe('manager rota mappers (Manual Rota MR-B)', () => {
 
   it('mapRotaBuildAssignment maps the assignment and its source, and carries nothing about who/why', () => {
     const mapped = mapRotaBuildAssignment({ id: 'a1', shift_instance_id: 's1', driver_id: 'd1', assignment_source: 'auto', assigned_at: '2030-01-01T10:00:00Z' });
-    expect(mapped).toEqual({ id: 'a1', shiftInstanceId: 's1', driverId: 'd1', source: 'auto', assignedAt: '2030-01-01T10:00:00Z' });
+    expect(mapped).toEqual({ id: 'a1', shiftInstanceId: 's1', driverId: 'd1', source: 'auto', assignedAt: '2030-01-01T10:00:00Z', attendance: null, checkIn: null });
     expect(Object.keys(mapped)).not.toContain('assignedBy');
   });
 
@@ -397,5 +403,55 @@ describe('manager rota mappers (Manual Rota MR-B)', () => {
     expect(parseRotaAvailabilityState('maybe')).toBeNull();
     expect(parseRotaAvailabilityState('')).toBeNull();
     expect(parseRotaAvailabilityState('AVAILABLE')).toBeNull();
+  });
+});
+
+describe('Attendance / check-in mappers (AT-B)', () => {
+  const base = { id: 'a1', shift_instance_id: 's1', driver_id: 'd1', assignment_source: 'manual', assigned_at: 'x' };
+
+  it('parseAttendanceStatus accepts exactly the four stored statuses', () => {
+    for (const status of ['worked', 'no_show', 'excused', 'cancelled']) expect(parseAttendanceStatus(status)).toBe(status);
+    for (const bad of ['late', 'WORKED', '', 'pending', 'not_recorded', null, undefined, 3]) expect(parseAttendanceStatus(bad)).toBeNull();
+  });
+
+  it('mapRotaBuildAssignment reads the embedded attendance and check-in as an object, a one-element array, or nothing', () => {
+    expect(mapRotaBuildAssignment({ ...base, attendance: { status: 'worked', recorded_at: 'r' }, driver_check_ins: { checked_in_at: 'c' } })).toMatchObject({
+      attendance: { status: 'worked', recordedAt: 'r' },
+      checkIn: { checkedInAt: 'c' },
+    });
+    expect(mapRotaBuildAssignment({ ...base, attendance: [{ status: 'excused', recorded_at: 'r' }], driver_check_ins: [{ checked_in_at: 'c' }] })).toMatchObject({
+      attendance: { status: 'excused' },
+      checkIn: { checkedInAt: 'c' },
+    });
+    expect(mapRotaBuildAssignment({ ...base, attendance: [], driver_check_ins: null })).toMatchObject({ attendance: null, checkIn: null });
+    expect(mapRotaBuildAssignment(base)).toMatchObject({ attendance: null, checkIn: null });
+  });
+
+  it('mapRotaBuildAssignment rejects an unknown embedded status rather than passing a string along', () => {
+    expect(() => mapRotaBuildAssignment({ ...base, attendance: { status: 'late', recorded_at: 'r' } })).toThrow();
+  });
+
+  it('mapAttendanceMutationResult / mapClearAttendanceResult / mapCheckInResult return null for anything but the documented shape', () => {
+    expect(mapAttendanceMutationResult(null)).toBeNull();
+    expect(mapAttendanceMutationResult(undefined)).toBeNull();
+    expect(mapAttendanceMutationResult({} as never)).toBeNull();
+    expect(mapClearAttendanceResult(null)).toBeNull();
+    expect(mapClearAttendanceResult({ assignment_id: 'a', previous_status: 'worked', changed: false } as never)).toBeNull();
+    expect(mapClearAttendanceResult({ assignment_id: 'a', previous_status: null, changed: true } as never)).toBeNull();
+    expect(mapClearAttendanceResult({ assignment_id: 'a', previous_status: null, changed: false } as never)).toEqual({ assignmentId: 'a', previousStatus: null, changed: false });
+    expect(mapCheckInResult(null)).toBeNull();
+    expect(mapCheckInResult({ check_in_id: 'c', assignment_id: 'a', shift_instance_id: 's', checked_in_at: 't', created: false } as never)).toEqual({
+      checkIn: { checkInId: 'c', assignmentId: 'a', shiftInstanceId: 's', checkedInAt: 't' },
+      created: false,
+    });
+  });
+
+  it('mapDriverVisibleAssignment rejects a row that lacks the server-computed window', () => {
+    expect(() =>
+      mapDriverVisibleAssignment({
+        assignment_id: 'a1', shift_instance_id: 's1', resort_id: 'r1', date: '2024-01-01', week_start: '2024-01-01', shift_key: 'k', name: 'n',
+        start_time: '08:00', end_time: '12:00', checked_in_at: null, check_in_opens_at: null, check_in_closes_at: null,
+      })
+    ).toThrow(/check-in window/);
   });
 });

@@ -5,6 +5,7 @@
  */
 
 import type { Database } from '../../types/database.generated';
+import { RepositoryError } from '../errors';
 import type { RotaBuildAssignment, RotaBuildAvailability, RotaBuildDriver } from '../managerRotaModel';
 import type {
   ApplyTemplateCancellationResult,
@@ -15,6 +16,11 @@ import type {
   DriverDeliveryRateRecord,
   DriverOnfleetMappingRecord,
   DriverRecord,
+  AttendanceMutationResult,
+  AttendanceRecord,
+  AttendanceStatus,
+  ClearAttendanceResult,
+  DriverCheckInResult,
   DriverVisibleAssignment,
   DriverVisibleShift,
   MaterialiseShiftsResult,
@@ -198,6 +204,13 @@ export function mapDriverVisibleShift(row: DriverVisibleShiftRow): DriverVisible
 }
 
 export function mapDriverVisibleAssignment(row: DriverVisibleAssignmentRow): DriverVisibleAssignment {
+  // The server computes the check-in window (resort timezone); a row without it is a contract break, not something to guess.
+  if (!row.check_in_opens_at || !row.check_in_closes_at) {
+    throw new RepositoryError('driver_visible_assignments returned a row without its check-in window', {
+      operation: 'rota.driverWeek.assignments',
+      cause: row,
+    });
+  }
   return {
     assignmentId: row.assignment_id!,
     shiftInstanceId: row.shift_instance_id!,
@@ -208,6 +221,9 @@ export function mapDriverVisibleAssignment(row: DriverVisibleAssignmentRow): Dri
     name: row.name!,
     startTime: row.start_time!,
     endTime: row.end_time!,
+    checkedInAt: row.checked_in_at ?? null,
+    checkInOpensAt: row.check_in_opens_at,
+    checkInClosesAt: row.check_in_closes_at,
   };
 }
 
@@ -396,14 +412,27 @@ export function mapCorrectDriverDeliveryRateResult(row: CorrectDriverDeliveryRat
 // ---------------------------------------------------------------------
 type RotaAssignmentRow = Database['public']['Tables']['rota_assignments']['Row'];
 type PublishRotaRow = Database['public']['Functions']['publish_rota']['Returns'][number];
+type RecordAttendanceRow = Database['public']['Functions']['record_attendance']['Returns'][number];
+type ClearAttendanceRow = Database['public']['Functions']['clear_attendance']['Returns'][number];
+type CheckInRow = Database['public']['Functions']['check_in_to_shift']['Returns'][number];
 
 export function mapRotaBuildDriver(row: Pick<DriverRow, 'id' | 'full_name' | 'is_active'>): RotaBuildDriver {
   return { id: row.id, fullName: row.full_name, isActive: row.is_active };
 }
 
-export function mapRotaBuildAssignment(
-  row: Pick<RotaAssignmentRow, 'id' | 'shift_instance_id' | 'driver_id' | 'assignment_source' | 'assigned_at'>
-): RotaBuildAssignment {
+/** PostgREST returns a one-to-one embed as an object (or null); accept a one-element array defensively. */
+type Embedded<T> = T | T[] | null | undefined;
+const one = <T>(value: Embedded<T>): T | null => (Array.isArray(value) ? (value[0] ?? null) : (value ?? null));
+
+/** The assignments read, with this assignment's attendance and check-in EMBEDDED (no extra query per assignment). */
+export type RotaAssignmentEmbedRow = Pick<RotaAssignmentRow, 'id' | 'shift_instance_id' | 'driver_id' | 'assignment_source' | 'assigned_at'> & {
+  attendance?: Embedded<{ status: string; recorded_at: string }>;
+  driver_check_ins?: Embedded<{ checked_in_at: string }>;
+};
+
+export function mapRotaBuildAssignment(row: RotaAssignmentEmbedRow): RotaBuildAssignment {
+  const attendance = one(row.attendance);
+  const checkIn = one(row.driver_check_ins);
   return {
     id: row.id,
     shiftInstanceId: row.shift_instance_id,
@@ -411,6 +440,83 @@ export function mapRotaBuildAssignment(
     // CHECK-constrained to ('manual','auto') at the DB level (migration 08).
     source: row.assignment_source as RotaAssignmentSource,
     assignedAt: row.assigned_at,
+    // No row is "Not recorded" / "Not checked in": null, never a status-like value.
+    attendance: attendance ? { status: requireAttendanceStatus(attendance.status, 'rota.managerWeek.assignments'), recordedAt: attendance.recorded_at } : null,
+    checkIn: checkIn ? { checkedInAt: checkIn.checked_in_at } : null,
+  };
+}
+
+const ATTENDANCE_STATUS_SET: ReadonlySet<string> = new Set<AttendanceStatus>(['worked', 'no_show', 'excused', 'cancelled']);
+
+/** The four stored statuses only. Anything else is a contract break, never passed along as a string. */
+export function parseAttendanceStatus(value: unknown): AttendanceStatus | null {
+  return typeof value === 'string' && ATTENDANCE_STATUS_SET.has(value) ? (value as AttendanceStatus) : null;
+}
+
+function requireAttendanceStatus(value: unknown, operation: string): AttendanceStatus {
+  const status = parseAttendanceStatus(value);
+  if (!status) throw new RepositoryError(`${operation} returned an unknown attendance status`, { operation, cause: value });
+  return status;
+}
+
+const isString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+
+/** record_attendance's single result row -> the domain result; null for anything but the documented shape. */
+export function mapAttendanceMutationResult(row: RecordAttendanceRow | null | undefined): AttendanceMutationResult | null {
+  if (!row) return null;
+  const status = parseAttendanceStatus(row.status);
+  if (
+    !status ||
+    !isString(row.attendance_id) ||
+    !isString(row.assignment_id) ||
+    !isString(row.shift_instance_id) ||
+    !isString(row.driver_id) ||
+    !isString(row.recorded_at) ||
+    !isString(row.updated_at) ||
+    typeof row.created !== 'boolean' ||
+    typeof row.changed !== 'boolean'
+  ) {
+    return null;
+  }
+  const record: AttendanceRecord = {
+    attendanceId: row.attendance_id,
+    assignmentId: row.assignment_id,
+    shiftInstanceId: row.shift_instance_id,
+    driverId: row.driver_id,
+    status,
+    recordedAt: row.recorded_at,
+    updatedAt: row.updated_at,
+  };
+  return { record, created: row.created, changed: row.changed };
+}
+
+/**
+ * clear_attendance's result row. previous_status is non-null exactly when something was cleared;
+ * a row that contradicts that (changed with no previous status, or the reverse) is malformed.
+ */
+export function mapClearAttendanceResult(row: ClearAttendanceRow | null | undefined): ClearAttendanceResult | null {
+  if (!row || !isString(row.assignment_id) || typeof row.changed !== 'boolean') return null;
+  const previousStatus = row.previous_status === null || row.previous_status === undefined ? null : parseAttendanceStatus(row.previous_status);
+  if (row.previous_status !== null && row.previous_status !== undefined && previousStatus === null) return null;
+  if (row.changed !== (previousStatus !== null)) return null;
+  return { assignmentId: row.assignment_id, previousStatus, changed: row.changed };
+}
+
+/** check_in_to_shift's result row -> the domain result; null for anything but the documented shape. */
+export function mapCheckInResult(row: CheckInRow | null | undefined): DriverCheckInResult | null {
+  if (
+    !row ||
+    !isString(row.check_in_id) ||
+    !isString(row.assignment_id) ||
+    !isString(row.shift_instance_id) ||
+    !isString(row.checked_in_at) ||
+    typeof row.created !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    checkIn: { checkInId: row.check_in_id, assignmentId: row.assignment_id, shiftInstanceId: row.shift_instance_id, checkedInAt: row.checked_in_at },
+    created: row.created,
   };
 }
 

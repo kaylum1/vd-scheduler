@@ -4,6 +4,12 @@ import type { RotaRepository } from '../types';
 import type {
   AssignDriverParams,
   AssignDriverResult,
+  AttendanceMutationResult,
+  CheckInToShiftParams,
+  ClearAttendanceParams,
+  ClearAttendanceResult,
+  DriverCheckInResult,
+  RecordAttendanceParams,
   AutoRotaPlan,
   AutoRotaResult,
   GenerateAutoRotaParams,
@@ -21,6 +27,9 @@ import { toISODate } from '../../mock-data/date-utils';
 import { buildDriverWeekRota } from '../driverRotaModel';
 import { buildManagerWeekRota } from '../managerRotaModel';
 import {
+  mapAttendanceMutationResult,
+  mapCheckInResult,
+  mapClearAttendanceResult,
   mapDriverVisibleAssignment,
   mapPublishRotaResult,
   mapRotaBuildAssignment,
@@ -29,7 +38,7 @@ import {
   mapShiftInstance,
   parseRotaAvailabilityState,
 } from './mappers';
-import { mapAutoRotaRpcError, mapPublishRotaRpcError, mapRotaRpcError } from './rotaErrors';
+import { mapAttendanceRpcError, mapAutoRotaRpcError, mapCheckInRpcError, mapPublishRotaRpcError, mapRotaRpcError } from './rotaErrors';
 
 export class SupabaseRotaRepository implements RotaRepository {
   constructor(private readonly client: SupabaseClient<Database>) {}
@@ -118,9 +127,10 @@ export class SupabaseRotaRepository implements RotaRepository {
         : await Promise.all([
             unwrap(
               'rota.managerWeek.assignments',
+              // Attendance and the driver's check-in are EMBEDDED through their FKs to the assignment: one query, never one per assignment.
               this.client
                 .from('rota_assignments')
-                .select('id, shift_instance_id, driver_id, assignment_source, assigned_at')
+                .select('id, shift_instance_id, driver_id, assignment_source, assigned_at, attendance(status, recorded_at), driver_check_ins(checked_in_at)')
                 .in('shift_instance_id', shiftIds)
             ),
             unwrap(
@@ -234,6 +244,54 @@ export class SupabaseRotaRepository implements RotaRepository {
     // Already published is a normal success row; the server's own counts are returned untouched.
     const result = mapPublishRotaResult(data?.[0]);
     if (!result) throw new RepositoryError('rota.publishRota returned an unexpected result', { operation, cause: data });
+    return result;
+  }
+
+  /**
+   * RPC wrapper only (AT-A): exactly one record_attendance call. Publication, the shift date vs
+   * the resort's operational today, the historical-backfill reason rule, cancelled shifts and the
+   * same-status no-op are all the database's; nothing is decided or derived here, and attendance
+   * is never written directly (managers have no write grant on the table).
+   */
+  async recordAttendance(params: RecordAttendanceParams): Promise<AttendanceMutationResult> {
+    const operation = 'rota.recordAttendance';
+    const { data, error } = await this.client.rpc('record_attendance', {
+      p_assignment_id: params.assignmentId,
+      p_status: params.status,
+      p_reason: params.reason ?? undefined,
+    });
+    if (error) throw mapAttendanceRpcError(operation, error);
+
+    const result = mapAttendanceMutationResult(data?.[0]);
+    if (!result) throw new RepositoryError('rota.recordAttendance returned an unexpected result', { operation, cause: data });
+    return result;
+  }
+
+  /** RPC wrapper only (AT-A): exactly one clear_attendance call; the reason is required and validated by the server. */
+  async clearAttendance(params: ClearAttendanceParams): Promise<ClearAttendanceResult> {
+    const operation = 'rota.clearAttendance';
+    const { data, error } = await this.client.rpc('clear_attendance', {
+      p_assignment_id: params.assignmentId,
+      p_reason: params.reason,
+    });
+    if (error) throw mapAttendanceRpcError(operation, error);
+
+    const result = mapClearAttendanceResult(data?.[0]);
+    if (!result) throw new RepositoryError('rota.clearAttendance returned an unexpected result', { operation, cause: data });
+    return result;
+  }
+
+  /**
+   * RPC wrapper only (AT-A2): exactly one check_in_to_shift call carrying ONLY the assignment id.
+   * The driver comes from the session and the timestamp from the server -- neither is ever sent.
+   */
+  async checkInToShift(params: CheckInToShiftParams): Promise<DriverCheckInResult> {
+    const operation = 'rota.checkInToShift';
+    const { data, error } = await this.client.rpc('check_in_to_shift', { p_assignment_id: params.assignmentId });
+    if (error) throw mapCheckInRpcError(operation, error);
+
+    const result = mapCheckInResult(data?.[0]);
+    if (!result) throw new RepositoryError('rota.checkInToShift returned an unexpected result', { operation, cause: data });
     return result;
   }
 }

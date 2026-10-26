@@ -28,6 +28,9 @@ export function describeRotaError(error: unknown): DescribedRotaError {
         return { message: 'This shift is in the past, so its assignments can’t be changed.', shouldRefresh: true };
       case 'attendance_recorded':
         return { message: 'This assignment can’t be removed because attendance has already been recorded.', shouldRefresh: false };
+      case 'check_in_recorded':
+        // The driver's check-in is new evidence the screen may not be showing yet: refetch so it appears.
+        return { message: 'This driver has already checked in, so this assignment can’t be removed.', shouldRefresh: true };
       case 'duplicate_assignment':
         return { message: 'This driver is already assigned to this shift. The rota has been refreshed.', shouldRefresh: true };
       case 'assignment_not_found':

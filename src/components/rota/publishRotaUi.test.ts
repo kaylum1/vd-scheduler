@@ -7,8 +7,8 @@ const shift = (date: string, activeAssigned = 0, inactiveAssigned = 0): ManagerR
   shiftInstanceId: `s-${date}`, shiftTypeId: 't', date, name: 'Dinner', sortOrder: 1, startTime: '18:00', endTime: '21:30',
   requiredDrivers: 2,
   assignments: [
-    ...Array.from({ length: activeAssigned }, (_, i) => ({ assignmentId: `a${i}`, driverId: `d${i}`, driverName: 'D', isDriverActive: true, source: 'manual' as const, assignedAt: 'x' })),
-    ...Array.from({ length: inactiveAssigned }, (_, i) => ({ assignmentId: `i${i}`, driverId: `x${i}`, driverName: 'X', isDriverActive: false, source: 'manual' as const, assignedAt: 'x' })),
+    ...Array.from({ length: activeAssigned }, (_, i) => ({ assignmentId: `a${i}`, driverId: `d${i}`, driverName: 'D', isDriverActive: true, source: 'manual' as const, assignedAt: 'x', attendance: null, checkIn: null })),
+    ...Array.from({ length: inactiveAssigned }, (_, i) => ({ assignmentId: `i${i}`, driverId: `x${i}`, driverName: 'X', isDriverActive: false, source: 'manual' as const, assignedAt: 'x', attendance: null, checkIn: null })),
   ],
   availabilityByDriver: {},
 });
