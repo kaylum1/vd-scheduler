@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../types/database.generated';
 import { SupabaseRotaRepository } from './rota';
-import { AutoRotaError, RepositoryError, isAutoRotaError, isAvailabilityOverrideRequired, isRotaAssignmentError } from '../errors';
+import {
+  AutoRotaError,
+  PublishRotaConfirmationRequiredError,
+  RepositoryError,
+  isAutoRotaError,
+  isAvailabilityOverrideRequired,
+  isPublishRotaConfirmationRequired,
+  isPublishRotaError,
+  isRotaAssignmentError,
+} from '../errors';
 // Raw source text -- used only by the architecture check proving this adapter
 // never writes rota_assignments directly.
 import rotaAdapterSource from './rota.ts?raw';
@@ -672,5 +681,152 @@ describe('SupabaseRotaRepository.generateAutoRota', () => {
     expect(rotaAdapterSource.match(/rpc\(\s*'apply_auto_rota'/g)).toHaveLength(1);
     const autoRotaSection = rotaAdapterSource.slice(rotaAdapterSource.indexOf('async generateAutoRota'));
     expect(autoRotaSection).not.toMatch(/assign_driver|unassign_driver|\.insert\(|\.update\(|\.delete\(|\.upsert\(|rota_assignments/);
+  });
+});
+
+describe('SupabaseRotaRepository.publishRota', () => {
+  const RESORT = 'resort-crans';
+  const WEEK = '2030-01-07';
+  const row = (over: Record<string, unknown> = {}) => ({
+    resort_id: RESORT,
+    week_start: WEEK,
+    published_at: '2030-01-01T10:00:00+00:00',
+    uncovered_slots: 0,
+    already_published: false,
+    ...over,
+  });
+  const ok = (over: Record<string, unknown> = {}) => ({ data: [row(over)], error: null });
+  const fail = (code: string, details: string | null, message = 'db message') => ({ data: null, error: { code, details, hint: null, message } });
+  const publish = (fake: ReturnType<typeof createFakeClient>, params: { confirmUncovered?: boolean } = {}) =>
+    new SupabaseRotaRepository(fake.client).publishRota({ resortId: RESORT, weekStart: WEEK, ...params });
+
+  it('1-2. calls publish_rota with the right resort and week', async () => {
+    const fake = createFakeClient({}, { publish_rota: ok() });
+    await publish(fake);
+    expect(fake.rpcCalls).toHaveLength(1);
+    expect(fake.rpcCalls[0].fn).toBe('publish_rota');
+    expect(fake.rpcCalls[0].args).toMatchObject({ p_resort_id: RESORT, p_week_start: WEEK });
+  });
+
+  it('3. confirmUncovered omitted -> p_confirm_uncovered false; explicit false -> false', async () => {
+    const omitted = createFakeClient({}, { publish_rota: ok() });
+    await publish(omitted);
+    expect(omitted.rpcCalls[0].args).toEqual({ p_resort_id: RESORT, p_week_start: WEEK, p_confirm_uncovered: false });
+    const explicit = createFakeClient({}, { publish_rota: ok() });
+    await publish(explicit, { confirmUncovered: false });
+    expect(explicit.rpcCalls[0].args.p_confirm_uncovered).toBe(false);
+  });
+
+  it('4. confirmUncovered true -> p_confirm_uncovered true', async () => {
+    const fake = createFakeClient({}, { publish_rota: ok({ uncovered_slots: 2 }) });
+    await publish(fake, { confirmUncovered: true });
+    expect(fake.rpcCalls[0].args).toEqual({ p_resort_id: RESORT, p_week_start: WEEK, p_confirm_uncovered: true });
+  });
+
+  it('sends nothing but those three arguments -- no counts, no generation source, no actor', async () => {
+    const fake = createFakeClient({}, { publish_rota: ok() });
+    await publish(fake, { confirmUncovered: true });
+    expect(Object.keys(fake.rpcCalls[0].args).sort()).toEqual(['p_confirm_uncovered', 'p_resort_id', 'p_week_start']);
+  });
+
+  it('5. maps snake_case to the camelCase domain result, exposing nothing else', async () => {
+    const fake = createFakeClient({}, { publish_rota: { data: [{ ...row({ uncovered_slots: 3 }), generation_source: 'auto', published_by: 'u-1', id: 'p-1' }], error: null } });
+    const result = await publish(fake);
+    expect(result).toEqual({ resortId: RESORT, weekStart: WEEK, publishedAt: '2030-01-01T10:00:00+00:00', uncoveredSlots: 3, alreadyPublished: false });
+    expect(Object.keys(result).sort()).toEqual(['alreadyPublished', 'publishedAt', 'resortId', 'uncoveredSlots', 'weekStart']);
+  });
+
+  it('6-7. already published is a NORMAL success that keeps the server\'s original timestamp and count', async () => {
+    const fake = createFakeClient({}, { publish_rota: ok({ already_published: true, published_at: '2029-12-30T08:00:00+00:00', uncovered_slots: 4 }) });
+    await expect(publish(fake)).resolves.toEqual({
+      resortId: RESORT,
+      weekStart: WEEK,
+      publishedAt: '2029-12-30T08:00:00+00:00',
+      uncoveredSlots: 4,
+      alreadyPublished: true,
+    });
+  });
+
+  it('7. a confirmed publish returns the server\'s CURRENT count, not the one from the earlier prompt', async () => {
+    const fake = createFakeClient({}, {
+      publish_rota: (_args, n) => (n === 1 ? fail('VD003', '3') : ok({ uncovered_slots: 2 })),
+    });
+    const repo = new SupabaseRotaRepository(fake.client);
+    const first = await repo.publishRota({ resortId: RESORT, weekStart: WEEK }).catch((e) => e);
+    expect((first as PublishRotaConfirmationRequiredError).uncoveredSlots).toBe(3);
+    const second = await repo.publishRota({ resortId: RESORT, weekStart: WEEK, confirmUncovered: true });
+    expect(second.uncoveredSlots).toBe(2);
+  });
+
+  it('8. VD003 with a valid count -> typed confirmation-required error carrying it', async () => {
+    const fake = createFakeClient({}, { publish_rota: fail('VD003', '5') });
+    const error = await publish(fake).catch((e) => e);
+    expect(isPublishRotaConfirmationRequired(error)).toBe(true);
+    expect((error as PublishRotaConfirmationRequiredError).uncoveredSlots).toBe(5);
+    expect(error).toBeInstanceOf(RepositoryError);
+  });
+
+  it.each([[null], [''], ['0'], ['-1'], ['2.5'], ['abc']])('9. VD003 with invalid DETAIL (%j) -> unknown, not a fake count', async (details) => {
+    const fake = createFakeClient({}, { publish_rota: fail('VD003', details) });
+    const error = await publish(fake).catch((e) => e);
+    expect(isPublishRotaConfirmationRequired(error)).toBe(false);
+    expect(isPublishRotaError(error, 'unknown')).toBe(true);
+  });
+
+  it.each([
+    ['10', '55006', 'historical_week', 'historical_week'],
+    ['11', '23514', 'no_shifts', 'no_shifts'],
+    ['12', '23514', 'resort_inactive', 'resort_inactive'],
+    ['13', 'P0002', null, 'resort_not_found'],
+    ['14', '22023', null, 'invalid_week'],
+    ['15', '42501', null, 'permission_denied'],
+  ])('%s. %s / %j -> PublishRotaError(%s)', async (_n, code, details, kind) => {
+    const fake = createFakeClient({}, { publish_rota: fail(code, details) });
+    const error = await publish(fake).catch((e) => e);
+    expect(isPublishRotaError(error, kind as never)).toBe(true);
+    expect(fake.rpcCalls).toHaveLength(1);
+  });
+
+  it('16-17. an unknown SQLSTATE, or a known one with an unexpected DETAIL, falls back to unknown', async () => {
+    for (const [code, details] of [['XX000', null], ['23514', 'surprise'], ['55006', 'published_week']] as const) {
+      const error = await publish(createFakeClient({}, { publish_rota: fail(code, details) })).catch((e) => e);
+      expect(isPublishRotaError(error, 'unknown')).toBe(true);
+    }
+  });
+
+  it('never leaks SQL internals through userMessage', async () => {
+    const error = (await publish(createFakeClient({}, { publish_rota: fail('23514', 'no_shifts', 'violates constraint rota_publications_x') })).catch((e) => e)) as RepositoryError;
+    expect(error.userMessage).toBe('This rota can’t be published because there are no shifts this week.');
+    expect(error.userMessage).not.toMatch(/constraint|rota_publications|23514/);
+  });
+
+  it.each([[{ data: [], error: null }], [{ data: null, error: null }], [{ data: [{ resort_id: RESORT }], error: null }], [{ data: [row({ uncovered_slots: '2' })], error: null }]])(
+    'a malformed success payload (%j) is a contract break, not a half-valid result',
+    async (response) => {
+      const error = await publish(createFakeClient({}, { publish_rota: response })).catch((e) => e);
+      expect(error).toBeInstanceOf(RepositoryError);
+      expect(isPublishRotaError(error)).toBe(false);
+    }
+  );
+
+  it('18-20. exactly ONE publish_rota call per invocation, no table reads, no direct rota_publications writes', async () => {
+    const fake = createFakeClient({}, { publish_rota: ok() });
+    await publish(fake);
+    await publish(fake, { confirmUncovered: true });
+    expect(fake.rpcCalls.map((c) => c.fn)).toEqual(['publish_rota', 'publish_rota']);
+    expect(fake.queries).toEqual([]); // no coverage / publication reads either
+    expect(fake.writes).toEqual([]);
+  });
+
+  it('does not retry on a confirmation-required error (the manager decides, not the repository)', async () => {
+    const fake = createFakeClient({}, { publish_rota: fail('VD003', '2') });
+    await publish(fake).catch(() => undefined);
+    expect(fake.rpcCalls).toHaveLength(1);
+  });
+
+  it('architecture: the adapter calls publish_rota once and never writes or derives publication data', () => {
+    expect(rotaAdapterSource.match(/rpc\(\s*'publish_rota'/g)).toHaveLength(1);
+    expect(rotaAdapterSource).not.toMatch(/from\(\s*'rota_publications'\s*\)\s*\.(insert|update|upsert|delete)/);
+    expect(rotaAdapterSource).not.toMatch(/generation_source|published_by/);
   });
 });

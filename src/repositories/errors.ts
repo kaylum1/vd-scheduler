@@ -192,3 +192,75 @@ export class AutoRotaError extends RepositoryError {
 export function isAutoRotaError(error: unknown, kind?: AutoRotaErrorKind): error is AutoRotaError {
   return error instanceof AutoRotaError && (kind === undefined || error.kind === kind);
 }
+
+// ---------------------------------------------------------------------
+// Publish Rota (PB-B): typed publication errors.
+//
+// publish_rota (PB-A) reports failures through SQLSTATE/DETAIL; the Supabase
+// adapter translates them (repositories/supabase/rotaErrors.ts) and the mock
+// throws the same classes. Already-published is a SUCCESS, never an error.
+// ---------------------------------------------------------------------
+
+/**
+ * publish_rota found open positions on today/future shifts and the caller had
+ * not acknowledged them (VD003). Nothing was published. `uncoveredSlots` is the
+ * server's count at that moment; the UI asks "Publish anyway?" and, only after
+ * an explicit yes, retries the same publishRota call with `confirmUncovered: true`.
+ * Not a failure message -- there is deliberately no error `kind` to switch on.
+ */
+export class PublishRotaConfirmationRequiredError extends RepositoryError {
+  readonly uncoveredSlots: number;
+
+  constructor(uncoveredSlots: number, options: { operation: string; cause?: unknown }) {
+    super(`${options.operation} needs confirmation: ${uncoveredSlots} uncovered`, { ...options, code: 'VD003' });
+    this.name = 'PublishRotaConfirmationRequiredError';
+    this.uncoveredSlots = uncoveredSlots;
+  }
+
+  override get userMessage(): string {
+    return this.uncoveredSlots === 1 ? '1 position is still uncovered.' : `${this.uncoveredSlots} positions are still uncovered.`;
+  }
+}
+
+/** Type guard so React code never needs `instanceof`, SQLSTATEs or PostgREST error shapes. */
+export function isPublishRotaConfirmationRequired(error: unknown): error is PublishRotaConfirmationRequiredError {
+  return error instanceof PublishRotaConfirmationRequiredError;
+}
+
+export type PublishRotaErrorKind =
+  | 'historical_week'
+  | 'no_shifts'
+  | 'resort_inactive'
+  | 'resort_not_found'
+  | 'invalid_week'
+  | 'permission_denied'
+  | 'unknown';
+
+const PUBLISH_ROTA_MESSAGES: Record<PublishRotaErrorKind, string> = {
+  historical_week: 'This rota can’t be published because the week is in the past.',
+  no_shifts: 'This rota can’t be published because there are no shifts this week.',
+  resort_inactive: 'This rota can’t be published because this resort is inactive.',
+  resort_not_found: 'That resort could not be found.',
+  invalid_week: 'This rota week is invalid.',
+  permission_denied: 'You don’t have permission to publish this rota.',
+  unknown: 'Couldn’t publish the rota. Please try again.',
+};
+
+export class PublishRotaError extends RepositoryError {
+  readonly kind: PublishRotaErrorKind;
+
+  constructor(kind: PublishRotaErrorKind, options: { operation: string; code?: string; cause?: unknown }) {
+    super(`${options.operation} failed: ${kind}`, options);
+    this.name = 'PublishRotaError';
+    this.kind = kind;
+  }
+
+  /** First-party, manager-facing copy. Never DB text, SQLSTATEs or constraint names. */
+  override get userMessage(): string {
+    return PUBLISH_ROTA_MESSAGES[this.kind];
+  }
+}
+
+export function isPublishRotaError(error: unknown, kind?: PublishRotaErrorKind): error is PublishRotaError {
+  return error instanceof PublishRotaError && (kind === undefined || error.kind === kind);
+}

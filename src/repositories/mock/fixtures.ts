@@ -162,17 +162,19 @@ export function nextMockAvailabilitySubmissionId(): string {
 }
 
 /**
- * Stage 3: mirrors rota_publications -- empty by default (mock mode has no
- * live manager Publish action yet, matching the real product's own
- * checkpoint sequencing). Tests that need to exercise the driver-facing
- * "published/locked" state push a row directly, the same idiom as
- * mockAvailabilitySubmissions above.
+ * Stage 3: mirrors rota_publications -- empty by default. Written by
+ * MockRotaRepository.publishRota (PB-B, the mock analogue of publish_rota);
+ * tests that need a specific state (a retracted row, a published week without
+ * going through Publish) may still push a row directly, the same idiom as
+ * mockAvailabilitySubmissions above. One logical row per resort + week.
  */
 export interface MockRotaPublication {
   resortId: string;
   weekStart: string;
   publishedAt: string | null;
   unpublishedAt: string | null;
+  /** Internal metadata only (never part of a domain result): 'auto' if the week had any auto assignment at publish time, else 'manual'. Optional so older fixtures need not set it. */
+  generationSource?: 'manual' | 'auto';
 }
 export const mockRotaPublications: MockRotaPublication[] = [];
 

@@ -6,6 +6,8 @@ import type {
   AutoRotaResult,
   GenerateAutoRotaParams,
   DriverVisibleAssignment,
+  PublishRotaParams,
+  PublishRotaResult,
   DriverWeekRota,
   ManagerWeekRota,
   RotaAvailabilityState,
@@ -13,14 +15,14 @@ import type {
   UnassignDriverParams,
   UnassignDriverResult,
 } from '../domain';
-import { AutoRotaError, AvailabilityOverrideRequiredError, RotaAssignmentError } from '../errors';
+import { AutoRotaError, AvailabilityOverrideRequiredError, PublishRotaConfirmationRequiredError, PublishRotaError, RotaAssignmentError } from '../errors';
 import { runAutoRota } from '../autoRotaOrchestration';
 import { summarizeOpenCoverage } from '../../lib/autoRotaPlanner';
 import { buildDriverWeekRota } from '../driverRotaModel';
 import { buildManagerWeekRota } from '../managerRotaModel';
-import { parseISODate, startOfWeek, toISODate } from '../../mock-data/date-utils';
+import { addDays, parseISODate, startOfWeek, toISODate } from '../../mock-data/date-utils';
 import { getOperationalToday } from '../../lib/operationalTime';
-import { mockAvailability, mockDrivers, mockResorts, mockRotaAssignments, mockShiftTemplates, nextMockRotaAssignmentId } from './fixtures';
+import { mockAvailability, mockDrivers, mockResorts, mockRotaAssignments, mockRotaPublications, mockShiftTemplates, nextMockRotaAssignmentId } from './fixtures';
 import { isMockWeekPublished } from './availability';
 import { generateMockShiftInstancesForWeek } from './shiftInstances';
 
@@ -53,8 +55,13 @@ import { generateMockShiftInstancesForWeek } from './shiftInstances';
  *    a mock reviseShift that retires and recreates a template changes the
  *    template id, so assignments made against the old instance ids stop
  *    appearing. The real database keeps instance identity across a revision.
- *  - PUBLISHED weeks stay editable, exactly like the database. There is no
- *    mock Publish action; a test pushes a row into mockRotaPublications.
+ *  - PUBLISHED weeks stay editable, exactly like the database.
+ *  - PUBLISH (publishRota) mirrors publish_rota's guards, order and
+ *    confirmation rule over mockRotaPublications, so a mock publish feeds the
+ *    manager rota, Driver My Rota, the Availability lock and Auto-Rota. Being a
+ *    mock it has no lock or concurrency (the database's week lock is tested in
+ *    supabase/tests/87_publish_rota.sql). There is no unpublish; a test may push
+ *    a retracted row into mockRotaPublications and publishRota republishes it.
  */
 
 const MAX_REASON_LENGTH = 500;
@@ -256,4 +263,72 @@ export class MockRotaRepository implements RotaRepository {
       runId: `mock-auto-rota-run-${mockAutoRotaRunSeq}`,
     };
   }
+
+  /**
+   * Mock analogue of publish_rota (PB-A): same guards in the same order, same
+   * typed errors, same confirmation rule. Coverage is counted here from the
+   * current mock state, exactly as the database counts its own.
+   */
+  async publishRota(params: PublishRotaParams): Promise<PublishRotaResult> {
+    const operation = 'rota.publishRota';
+    const { resortId, weekStart } = params;
+    const fail = (kind: ConstructorParameters<typeof PublishRotaError>[0]) => new PublishRotaError(kind, { operation });
+
+    if (!resortId || !weekStart) throw fail('invalid_week');
+    const week = parseISODate(weekStart);
+    if (Number.isNaN(week.getTime()) || startOfWeek(week).getTime() !== week.getTime()) throw fail('invalid_week');
+
+    const resort = mockResorts.find((r) => r.id === resortId);
+    if (!resort) throw fail('resort_not_found');
+    if (!resort.isActive) throw fail('resort_inactive');
+
+    const today = operationalTodayIso();
+    const shifts = generateMockShiftInstancesForWeek(resortId, weekStart).filter((s) => s.status === 'active');
+    const uncoveredSlots = countUncoveredSlots(shifts, today);
+    const existing = mockRotaPublications.find((p) => p.resortId === resortId && p.weekStart === weekStart);
+
+    // Already published: a normal success -- nothing is written, the original timestamp is kept.
+    if (existing && existing.publishedAt !== null && existing.unpublishedAt === null) {
+      return { resortId, weekStart, publishedAt: existing.publishedAt, uncoveredSlots, alreadyPublished: true };
+    }
+
+    if (toISODate(addDays(week, 6)) < today) throw fail('historical_week');
+    if (shifts.length === 0) throw fail('no_shifts');
+    if (!shifts.some((s) => s.date >= today)) throw fail('historical_week');
+
+    // The server (here: this mock) recounts on every call; a yes only acknowledges, it never supplies a number.
+    if (uncoveredSlots > 0 && params.confirmUncovered !== true) {
+      throw new PublishRotaConfirmationRequiredError(uncoveredSlots, { operation });
+    }
+
+    const shiftIds = new Set(shifts.map((s) => s.id));
+    const generationSource = mockRotaAssignments.some((a) => shiftIds.has(a.shiftInstanceId) && a.source === 'auto') ? 'auto' : 'manual';
+    const publishedAt = new Date().toISOString();
+    if (existing) {
+      // A retracted row: republish the same logical resort + week (one row per resort + week).
+      existing.publishedAt = publishedAt;
+      existing.unpublishedAt = null;
+      existing.generationSource = generationSource;
+    } else {
+      mockRotaPublications.push({ resortId, weekStart, publishedAt, unpublishedAt: null, generationSource });
+    }
+    return { resortId, weekStart, publishedAt, uncoveredSlots, alreadyPublished: false };
+  }
+}
+
+/**
+ * Open positions on today/future ACTIVE shifts: required_drivers minus the
+ * assignments of ACTIVE drivers (an inactive assignee does not cover), never
+ * negative. Past gaps are ignored. Mirrors _auto_rota_open_slots.
+ */
+function countUncoveredSlots(shifts: ShiftInstanceRecord[], today: string): number {
+  let open = 0;
+  for (const shift of shifts) {
+    if (shift.date < today) continue;
+    const covering = mockRotaAssignments.filter(
+      (a) => a.shiftInstanceId === shift.id && mockDrivers.some((d) => d.id === a.driverId && d.isActive)
+    ).length;
+    open += Math.max(shift.requiredDrivers - covering, 0);
+  }
+  return open;
 }

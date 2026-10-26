@@ -38,6 +38,8 @@ import type {
   AutoRotaResult,
   GenerateAutoRotaParams,
   ManagerWeekRota,
+  PublishRotaParams,
+  PublishRotaResult,
   UnassignDriverParams,
   UnassignDriverResult,
   DriverVisibleShift,
@@ -326,6 +328,29 @@ export interface RotaRepository {
    * create" are successes (check remainingOpenSlots), never errors.
    */
   generateAutoRota(params: GenerateAutoRotaParams): Promise<AutoRotaResult>;
+
+  /**
+   * Publishes ONE resort + Monday-Sunday week (manager only), through the single
+   * authoritative publish_rota call (PB-A). This is the only write path to the
+   * publication state -- the repository neither writes rota_publications itself
+   * nor counts coverage: the server decides everything and React never sees the
+   * RPC, SQLSTATEs or the table.
+   *
+   * Publishing makes the week's assigned shifts visible to drivers, locks driver
+   * availability for the week and stops Auto-Rota generating it. Manual edits
+   * stay possible afterwards and are live for drivers (no snapshot).
+   *
+   * Flow: call without `confirmUncovered`. If positions are still uncovered the
+   * server refuses and this rejects with PublishRotaConfirmationRequiredError
+   * (carrying the count; nothing was published). Only after the manager
+   * explicitly agrees, call again with `confirmUncovered: true`; the result then
+   * carries the server's count AT THAT MOMENT, which may differ from the prompt.
+   *
+   * Already published is a success (`alreadyPublished: true`), not an error.
+   * Real failures are typed PublishRotaErrors (historical_week, no_shifts,
+   * resort_inactive, ...). There is no unpublish in V1.
+   */
+  publishRota(params: PublishRotaParams): Promise<PublishRotaResult>;
 
   /**
    * Atomic (unassign_driver). Removes exactly one assignment. Rejected: not

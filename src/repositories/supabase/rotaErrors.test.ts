@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   AutoRotaError,
   AvailabilityOverrideRequiredError,
+  PublishRotaConfirmationRequiredError,
+  PublishRotaError,
   RepositoryError,
   RotaAssignmentError,
   isAvailabilityOverrideRequired,
+  isPublishRotaConfirmationRequired,
+  isPublishRotaError,
   isRotaAssignmentError,
   type PostgrestLikeError,
 } from '../errors';
-import { mapAutoRotaRpcError, mapRotaRpcError } from './rotaErrors';
+import { mapAutoRotaRpcError, mapPublishRotaRpcError, mapRotaRpcError } from './rotaErrors';
 
 const err = (code: string, details: string | null, message = 'db message'): PostgrestLikeError => ({ code, details, hint: null, message });
 
@@ -140,5 +144,104 @@ describe('mapAutoRotaRpcError (apply_auto_rota contract)', () => {
   it('keeps the original error as the (log-only) cause', () => {
     const original = err('VD002', 'stale_plan');
     expect(mapAutoRotaRpcError('rota.generateAutoRota', original).cause).toBe(original);
+  });
+});
+
+describe('mapPublishRotaRpcError (publish_rota, PB-A contract)', () => {
+  const map = (code: string, details: string | null, message = 'db message') => mapPublishRotaRpcError('rota.publishRota', err(code, details, message));
+
+  describe('VD003 (confirmation required)', () => {
+    it.each([['1', 1], ['2', 2], ['17', 17], ['1000', 1000]])('VD003 + %j -> typed confirmation-required carrying %i uncovered slots', (details, count) => {
+      const e = map('VD003', details);
+      expect(e).toBeInstanceOf(PublishRotaConfirmationRequiredError);
+      expect(isPublishRotaConfirmationRequired(e)).toBe(true);
+      expect(isPublishRotaError(e)).toBe(false);
+      expect((e as PublishRotaConfirmationRequiredError).uncoveredSlots).toBe(count);
+      expect(e.code).toBe('VD003');
+    });
+
+    it('reads the count from DETAIL only -- a number in the message is never used', () => {
+      const e = map('VD003', '2', '9 position(s) in this week are still uncovered.') as PublishRotaConfirmationRequiredError;
+      expect(e.uncoveredSlots).toBe(2);
+      const noDetail = map('VD003', null, '9 position(s) in this week are still uncovered.');
+      expect(isPublishRotaConfirmationRequired(noDetail)).toBe(false);
+      expect(isPublishRotaError(noDetail, 'unknown')).toBe(true);
+    });
+
+    it.each([[''], ['0'], ['-1'], ['2.5'], ['abc'], ['01'], [' 3'], ['3 '], ['1e3'], ['+2'], ['99999999999999999999'], [null]])(
+      'VD003 + invalid DETAIL (%j) is NEVER a fake count: it becomes the generic unknown error',
+      (details) => {
+        const e = map('VD003', details);
+        expect(isPublishRotaConfirmationRequired(e)).toBe(false);
+        expect(isPublishRotaError(e, 'unknown')).toBe(true);
+      }
+    );
+
+    it('exposes first-party copy, with correct singular / plural', () => {
+      expect((map('VD003', '1') as PublishRotaConfirmationRequiredError).userMessage).toBe('1 position is still uncovered.');
+      expect((map('VD003', '3') as PublishRotaConfirmationRequiredError).userMessage).toBe('3 positions are still uncovered.');
+    });
+  });
+
+  describe('every other contract outcome', () => {
+    it.each([
+      ['55006', 'historical_week', 'historical_week'],
+      ['23514', 'no_shifts', 'no_shifts'],
+      ['23514', 'resort_inactive', 'resort_inactive'],
+      ['P0002', null, 'resort_not_found'],
+      ['22023', null, 'invalid_week'],
+      ['42501', null, 'permission_denied'],
+    ])('%s + DETAIL %j -> kind %s', (code, details, kind) => {
+      const e = map(code, details);
+      expect(e).toBeInstanceOf(PublishRotaError);
+      expect(isPublishRotaError(e, kind as never)).toBe(true);
+      expect(isPublishRotaConfirmationRequired(e)).toBe(false);
+      expect(e.code).toBe(code);
+    });
+
+    it.each([
+      ['23514', null], ['23514', 'something_else'], ['23514', 'NO_SHIFTS'], ['23514', ''],
+      ['55006', null], ['55006', 'published_week'], ['55006', 'historical_shift'], ['55006', 'attendance_recorded'],
+      ['22023', 'plan_malformed'], ['22023', 'anything'],
+      ['VD001', 'unavailable'], ['VD002', 'stale_plan'], ['23505', null], ['XX000', null], ['PGRST301', null], ['', null],
+    ])('%s + DETAIL %j is unexpected -> unknown (never mistaken for a known outcome)', (code, details) => {
+      const e = map(code, details);
+      expect(isPublishRotaError(e, 'unknown')).toBe(true);
+    });
+
+    it('a missing code is unknown too', () => {
+      expect(isPublishRotaError(mapPublishRotaRpcError('rota.publishRota', { message: 'network down' }), 'unknown')).toBe(true);
+    });
+
+    it('does not guess from the friendly message text', () => {
+      expect(isPublishRotaError(map('23514', null, 'This resort is inactive, so its rota can’t be published.'), 'unknown')).toBe(true);
+      expect(isPublishRotaError(map('55006', null, 'This week is in the past, so it can’t be published.'), 'unknown')).toBe(true);
+      expect(isPublishRotaError(map('23514', 'no_shifts', 'whatever'), 'no_shifts')).toBe(true);
+    });
+  });
+
+  describe('what callers see', () => {
+    it('keeps the original PostgREST error as cause and exposes only first-party copy, never DB text', () => {
+      const e = map('55006', 'historical_week', 'raw db text rota_publications_resort_week_unique');
+      expect(e.cause).toMatchObject({ code: '55006', details: 'historical_week' });
+      expect(e.userMessage).toBe('This rota can’t be published because the week is in the past.');
+      expect(e.userMessage).not.toMatch(/55006|rota_publications|historical_week|VD003/);
+    });
+
+    it.each([
+      ['55006', 'historical_week', 'This rota can’t be published because the week is in the past.'],
+      ['23514', 'no_shifts', 'This rota can’t be published because there are no shifts this week.'],
+      ['23514', 'resort_inactive', 'This rota can’t be published because this resort is inactive.'],
+      ['42501', null, 'You don’t have permission to publish this rota.'],
+      ['22023', null, 'This rota week is invalid.'],
+      ['XX000', null, 'Couldn’t publish the rota. Please try again.'],
+    ])('%s / %j -> "%s"', (code, details, message) => {
+      expect(map(code, details).userMessage).toBe(message);
+    });
+
+    it('the operation is carried through for logging', () => {
+      expect(map('VD003', '2').operation).toBe('rota.publishRota');
+      expect(map('42501', null).operation).toBe('rota.publishRota');
+    });
   });
 });

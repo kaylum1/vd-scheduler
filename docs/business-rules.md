@@ -1254,3 +1254,71 @@ shifts on one day.
   Publish workflow yet (next checkpoint: minimal Publish Rota).
 - The availability read is bounded by the API's 1000-row cap (shifts × drivers).
 
+
+## S. Publish Rota — database and repository (PB-A, PB-B) — UI NOT implemented yet
+
+**Status: Publish Rota is IN PROGRESS and is NOT complete.** The authoritative
+database RPC (PB-A) and the repository / error contract / mock provider (PB-B) are
+built and tested. **There is no manager Publish control yet** — no button, dialog
+or hook; that is PB-C — so a manager still cannot publish from the app.
+
+**What publishing means.** One deliberate, server-validated act per resort +
+Monday–Sunday week that (a) makes the week's assigned shifts visible to drivers,
+(b) locks driver Availability for the week and (c) stops Auto-Rota generating it.
+All three already derive from a currently-published `rota_publications` row, so
+publishing is a single row write: nothing is snapshotted, and drivers keep seeing
+the live assignments — a Manual Rota edit after publishing (allowed, §C) is
+visible to drivers on their next refetch. No notifications, no auto-publish, no
+new tables, versioning or snapshots.
+
+**PB-A (database).** `publish_rota(p_resort_id, p_week_start, p_confirm_uncovered
+default false)` is manager-only and SECURITY DEFINER, and is the **only**
+application write path to `rota_publications`: managers keep SELECT, and direct
+INSERT / UPDATE / DELETE is closed (the previous FOR ALL policy and grants are
+gone). It takes the shared resort/week lock (the same one Auto-Rota apply and
+manual assign/unassign use), so publish, Auto-Rota apply, manual edits and other
+publishes serialize per resort + week (verified with real two-connection races).
+Rules, in order:
+- **Already published → idempotent success** (`already_published`): no write, no
+  duplicate row, no extra audit event, the original `published_at`.
+- Inactive resort → `23514 resort_inactive`; a week that ended before the resort's
+  operational today, or whose active shifts are all before today →
+  `55006 historical_week`; no active shift instance → `23514 no_shifts`. A partially
+  historical or current week, and a shift dated today, are publishable.
+- **Uncovered positions** (today/future active shifts: `required_drivers` minus
+  assignments of ACTIVE drivers, never negative; past gaps ignored) are allowed but
+  must be acknowledged: without `p_confirm_uncovered` the server raises `VD003` with
+  the count in DETAIL and writes nothing. The count is recomputed under the lock on
+  every call — a stale prompt can never publish against an outdated number. A week
+  with zero assignments is publishable the same way.
+- `generation_source` is derived on the server (`auto` if any assignment in that
+  resort + week is auto, else `manual`; recomputed when a retracted row is
+  republished) and is never supplied by the caller. A retracted row (the schema's
+  `unpublished_at`) is republished by UPDATE because the table is unique per
+  resort + week.
+- Audited via the generic trigger plus a context (operation, resort, week,
+  uncovered count, whether it was acknowledged, source, republished).
+- **Publish-only in V1**: there is no unpublish / retract RPC or control.
+- Availability confirmation is not part of publishing: a driver who has not
+  confirmed Availability produces no special warning; the only acknowledgement is
+  for uncovered positions.
+
+**PB-B (repository).** `RotaRepository.publishRota({ resortId, weekStart,
+confirmUncovered? })` → `PublishRotaResult { resortId, weekStart, publishedAt,
+uncoveredSlots, alreadyPublished }` (no generation source, actor or row id). The
+Supabase provider makes exactly one `publish_rota` call per invocation and neither
+writes `rota_publications` nor counts coverage. Failures are typed and React never
+sees SQLSTATEs: `PublishRotaConfirmationRequiredError` (`uncoveredSlots`; guard
+`isPublishRotaConfirmationRequired`; the count is parsed from DETAIL only and an
+invalid / missing count becomes `unknown`, never a made-up number) and
+`PublishRotaError` with kind `historical_week`, `no_shifts`, `resort_inactive`,
+`resort_not_found`, `invalid_week`, `permission_denied` or `unknown` (any
+unexpected SQLSTATE / DETAIL combination). Already published is a normal result.
+The mock provider mirrors the same guards, order, confirmation rule and typed
+errors over `mockRotaPublications`, so a mock publish feeds the manager rota,
+Driver My Rota, the Availability lock and the Auto-Rota block; it has no lock or
+concurrency (that is the database's, tested in `87_publish_rota.sql`).
+
+**Not built yet (PB-C / PB-D):** the Publish Rota button and confirmation dialog in
+the Manual Rota header, the mutation and query invalidation, and the HANDOFF
+rewrite.

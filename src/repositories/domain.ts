@@ -611,3 +611,35 @@ export interface AutoRotaResult {
   /** Groups this run's audit rows. */
   runId: string;
 }
+
+// ---------------------------------------------------------------------
+// Publish Rota (PB-B). publish_rota (PB-A) is the single authoritative
+// write path; React only ever sees PublishRotaResult, PublishRotaError and
+// PublishRotaConfirmationRequiredError.
+// ---------------------------------------------------------------------
+
+export interface PublishRotaParams {
+  resortId: string;
+  weekStart: string;
+  /**
+   * Acknowledges the open positions the server reported in a previous
+   * PublishRotaConfirmationRequiredError. Omitted / false on the first call. The
+   * server recounts regardless, so this is a yes/no, never a number.
+   */
+  confirmUncovered?: boolean;
+}
+
+/**
+ * The AUTHORITATIVE publication state after one publishRota call. Already
+ * published is a normal success (`alreadyPublished: true`, the original
+ * `publishedAt`). Deliberately absent: generation_source, published_by, the
+ * audit context and the publication row id -- internal to the database.
+ */
+export interface PublishRotaResult {
+  resortId: string;
+  weekStart: string;
+  publishedAt: string;
+  /** Open positions on today/future shifts at publish time, recounted by the server (0 for a fully covered week). */
+  uncoveredSlots: number;
+  alreadyPublished: boolean;
+}

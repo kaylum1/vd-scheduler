@@ -18,6 +18,7 @@ import type {
   DriverVisibleAssignment,
   DriverVisibleShift,
   MaterialiseShiftsResult,
+  PublishRotaResult,
   ReopenWeekOutcome,
   ResortRecord,
   RotaAssignmentSource,
@@ -394,6 +395,7 @@ export function mapCorrectDriverDeliveryRateResult(row: CorrectDriverDeliveryRat
 // override reason / audit context never enters the rota read model.
 // ---------------------------------------------------------------------
 type RotaAssignmentRow = Database['public']['Tables']['rota_assignments']['Row'];
+type PublishRotaRow = Database['public']['Functions']['publish_rota']['Returns'][number];
 
 export function mapRotaBuildDriver(row: Pick<DriverRow, 'id' | 'full_name' | 'is_active'>): RotaBuildDriver {
   return { id: row.id, fullName: row.full_name, isActive: row.is_active };
@@ -424,4 +426,30 @@ export function mapRotaBuildAvailability(row: Pick<AvailabilityRow, 'shift_insta
 /** assign_driver reports exactly these three states; anything else is a contract break, not a value to pass along. */
 export function parseRotaAvailabilityState(value: string): RotaAvailabilityState | null {
   return value === 'available' || value === 'unavailable' || value === 'not_submitted' ? value : null;
+}
+
+/**
+ * publish_rota's single result row -> the domain result. The only place its
+ * snake_case names are read, so none of them leak upward. Returns null for a row
+ * that is not the documented shape, which the caller reports as a contract
+ * break rather than passing a half-valid result to React.
+ */
+export function mapPublishRotaResult(row: PublishRotaRow | null | undefined): PublishRotaResult | null {
+  if (
+    !row ||
+    typeof row.resort_id !== 'string' ||
+    typeof row.week_start !== 'string' ||
+    typeof row.published_at !== 'string' ||
+    typeof row.uncovered_slots !== 'number' ||
+    typeof row.already_published !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    resortId: row.resort_id,
+    weekStart: row.week_start,
+    publishedAt: row.published_at,
+    uncoveredSlots: row.uncovered_slots,
+    alreadyPublished: row.already_published,
+  };
 }
