@@ -73,7 +73,14 @@ end $$;
 
 -- ---------------------------------------------------------------------
 -- Attendance: valid statuses, duplicate rejection, cross-resort rejection.
+--
+-- Table-level constraint tests, so they run as the database owner: since
+-- Attendance AT-A an authenticated manager has no direct write on attendance
+-- (record_attendance / clear_attendance are the only client path, see
+-- 88_record_attendance.sql). Both drivers below really are assigned to the
+-- shift -- an attendance row for an unassigned pair is now impossible.
 -- ---------------------------------------------------------------------
+select pg_temp.as_postgres();
 do $$
 begin
   insert into attendance (shift_instance_id, driver_id, resort_id, status)
@@ -98,6 +105,7 @@ select pg_temp.expect_error('attendance: cross-resort driver/shift pairing rejec
   format('insert into attendance (shift_instance_id, driver_id, resort_id, status) values (%L, %L, %L, %L)',
     current_setting('dbtest.assign_shift_id'), current_setting('dbtest.driver_b_id'), current_setting('dbtest.resort_a'), 'worked'),
   '23503');
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
 
 -- ---------------------------------------------------------------------
 -- Payroll adjustments: valid types, positive amount, void (never delete).

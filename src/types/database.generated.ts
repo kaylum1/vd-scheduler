@@ -128,6 +128,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "attendance_assignment_fk"
+            columns: ["shift_instance_id", "driver_id"]
+            isOneToOne: true
+            referencedRelation: "rota_assignments"
+            referencedColumns: ["shift_instance_id", "driver_id"]
+          },
+          {
             foreignKeyName: "attendance_driver_resort_fk"
             columns: ["driver_id", "resort_id"]
             isOneToOne: false
@@ -1202,6 +1209,14 @@ export type Database = {
           availability_state: string
         }[]
       }
+      clear_attendance: {
+        Args: { p_assignment_id: string; p_reason: string }
+        Returns: {
+          assignment_id: string
+          changed: boolean
+          previous_status: string
+        }[]
+      }
       confirm_availability_week: {
         Args: { p_driver_id: string; p_week_start: string }
         Returns: {
@@ -1372,6 +1387,20 @@ export type Database = {
         }
         Returns: {
           shift_type_id: string
+        }[]
+      }
+      record_attendance: {
+        Args: { p_assignment_id: string; p_reason?: string; p_status: string }
+        Returns: {
+          assignment_id: string
+          attendance_id: string
+          changed: boolean
+          created: boolean
+          driver_id: string
+          recorded_at: string
+          shift_instance_id: string
+          status: string
+          updated_at: string
         }[]
       }
       reopen_availability_week: {

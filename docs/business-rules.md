@@ -1403,3 +1403,82 @@ row, one audit insert, the second an idempotent success); audit contexts correct
 leaking onto other tables or later writes; mock mode and 375px mobile (actions row,
 disabled reasons, both dialogs, pending state, warning notice, published cards, no
 horizontal overflow); keyboard operation, focus trap, Escape, focus return.
+
+## T. Attendance — database foundation (AT-A) — UI / repository NOT implemented yet
+
+**Status: only the authoritative database layer exists (AT-A). There is no repository
+API, mock state or manager UI for Attendance yet, and Attendance is NOT complete.**
+No payroll calculation exists or is implied.
+
+**What it is.** Attendance records what actually happened to an ASSIGNED driver on a
+Shift: operational truth that payroll will later consume. It is **manager-authoritative**
+(drivers have no read and no write; anon none) because it affects pay. There is one row
+per rota assignment, and **no row means "Not recorded"** — there is no persisted
+pending / not-recorded status. Missing attendance will later be a payroll exception;
+the published rota is **not** an attendance fallback (the old table comment that said
+otherwise was corrected).
+
+**Statuses (exactly four, unchanged).** `worked` — the driver worked this assigned
+Shift. `no_show` — expected, did not work, absence not accepted. `excused` — did not
+work, management accepted the absence. `cancelled` — **this driver** was stood down /
+their attendance was cancelled and they did not work; it does **not** mean the Shift
+Instance was cancelled (a separate concept). Later UI wording: "Cancelled (stood
+down)". Downstream, only `worked` earns the Shift base guarantee; `no_show`, `excused`,
+`cancelled` and no row do not (§G.E).
+
+**Writes.** `record_attendance(p_assignment_id, p_status, p_reason default null)` and
+`clear_attendance(p_assignment_id, p_reason)` are manager-only SECURITY DEFINER RPCs and
+the only application write path; managers keep SELECT, direct INSERT / UPDATE / DELETE
+is closed. The assignment id is the identity: the server derives shift, driver, resort
+and week. A composite FK `attendance(shift_instance_id, driver_id) →
+rota_assignments(…) ON DELETE RESTRICT` makes attendance for an unassigned pair
+impossible and stops an assignment being deleted from under its attendance.
+
+**When it may be recorded** (resort operational date, no start/end-time arithmetic;
+the Shift need not have ended):
+- **Future** shift → refused (`future_shift`), whatever the publication state.
+- **Today** → the week must currently be Published (`week_not_published`): until it is
+  live, today's assignments are still operationally editable.
+- **Past, week Published** → allowed, no special reason.
+- **Past, week NOT Published** (a missed Publish; a wholly past week can no longer be
+  newly published) → a **historical backfill**: allowed but an explicit **reason is
+  required** (`historical_backfill_reason_required`), and the audit flags
+  `historical_backfill = true`. Recording never publishes the week or touches
+  `rota_publications`.
+- A **cancelled** Shift Instance refuses new attendance (`shift_cancelled`).
+- The driver's active flag and the resort's active flag never block it (history stays
+  correctable).
+- Not supported in V1: someone who covered a past Shift without ever being assigned
+  cannot be recorded, because assignment creation on past shifts is frozen. A future
+  audited historical assignment / backfill workflow would be needed.
+
+**Correction.** The first record inserts; a different status **updates the same row in
+place** (the audit before-snapshot keeps the previous value); `recorded_by` and
+`recorded_at` are set to the manager and time of the **latest** recording action. The
+same status again is an idempotent success (`changed = false`: no write, no audit — a
+different reason is audit metadata, not a change). The optional reason (trimmed, empty
+= none, max 500) is stored **only in the audit context**, never in `attendance.notes`.
+
+**Clear.** `clear_attendance` deletes the row to return the assignment to Not recorded
+(a **required** reason, max 500), so one accidental entry can't block unassigning a
+today assignment forever. Already Not recorded is an idempotent success (no write, no
+audit). It is not gated on publication, date or Shift status (historical corrections
+and removal of corrupt rows must stay possible) and does not touch the assignment,
+publication, availability, the Shift or pay. After a clear, today's assignment can be
+removed again under the normal Manual Rota rules; a past assignment stays frozen.
+
+**Serialization.** Both RPCs take the existing `rota_week_lock(resort, week)` and re-read
+the assignment: record vs `unassign_driver` — whoever locks first wins (attendance
+first → the unassign is refused `attendance_recorded`; unassign first → the record is
+`assignment_not_found`); record vs record and clear vs unassign serialize; Publish vs
+record-today serialize and publication is read under the lock. The FK is the last
+defence.
+
+**Audit.** Generic row audit plus context: record — `operation record_attendance,
+assignment_id, resort_id, week_start, previous_status, new_status, historical_backfill,
+reason (when given)`; clear — `operation clear_attendance, assignment_id, resort_id,
+week_start, previous_status, reason`.
+
+**Deferred / not built:** `actual_start` / `actual_end` (reserved columns, not exposed
+by the RPCs), repository / mock / read-model / UI (AT-B, AT-C), payroll calculation,
+Onfleet, the live Dashboard, an audited historical-assignment workflow.

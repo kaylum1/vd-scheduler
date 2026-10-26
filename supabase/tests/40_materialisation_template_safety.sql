@@ -89,13 +89,18 @@ select pg_temp.expect_true('adhoc protection: an origin=adhoc instance is exclud
 select pg_temp.as_postgres(); -- managers have no direct rota_publications write (PB-A); fixture row as owner
 insert into rota_publications (resort_id, week_start, generation_source)
 values (current_setting('dbtest.resort_a')::uuid, '2027-07-12', 'manual'); -- covers the 2027-07-12 week (Mon 07-12)
-select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
+-- Attendance must belong to a real assignment (composite FK, AT-A), and managers cannot write the table
+-- directly: the fixture is an assignment + attendance row written as the database owner.
 do $$
 begin
+  insert into rota_assignments (shift_instance_id, driver_id, resort_id, assignment_source)
+  select id, current_setting('dbtest.driver_a_id')::uuid, current_setting('dbtest.resort_a')::uuid, 'manual'
+  from shift_instances where shift_type_id = current_setting('dbtest.mat_shift_type')::uuid and date = '2027-07-15';
   insert into attendance (shift_instance_id, driver_id, resort_id, status)
   select id, current_setting('dbtest.driver_a_id')::uuid, current_setting('dbtest.resort_a')::uuid, 'worked'
   from shift_instances where shift_type_id = current_setting('dbtest.mat_shift_type')::uuid and date = '2027-07-15';
 end $$;
+select pg_temp.act_as('authenticated', current_setting('dbtest.manager_id')::uuid);
 select pg_temp.expect_true('published protection: a published week''s instance is excluded from preview_template_refresh',
   not exists (select 1 from preview_template_refresh(current_setting('dbtest.resort_a')::uuid, '2027-07-01'::date)
     where date = '2027-07-12' and shift_type_id = current_setting('dbtest.mat_shift_type')::uuid));
