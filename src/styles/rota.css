@@ -423,6 +423,10 @@
   white-space: nowrap;
 }
 
+.manual-rota__publish-notice:focus {
+  outline: none; /* a focus destination for assistive tech; the notice itself is the visible cue */
+}
+
 .manual-rota__reasons {
   display: flex;
   flex-direction: column;

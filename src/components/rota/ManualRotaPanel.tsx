@@ -82,6 +82,13 @@ export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId:
   // ---- Publish Rota ---------------------------------------------------
   // Same selection-scoped lifecycle as Generate; the hook owns the dialog stage, the running call and the notice.
   const publish = usePublishRota(resortId, weekStart);
+  // After a successful publish the Publish button is the disabled "Published" control, so focus goes to the result notice
+  // (a programmatically focusable region) instead of falling to the page body. Cancel / Escape / a failure leave focus to
+  // the Modal's normal restore, which returns it to the still-enabled Publish Rota opener.
+  const publishNoticeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (publish.focusRequest > 0) publishNoticeRef.current?.focus();
+  }, [publish.focusRequest]);
 
   const assignMutation = useMutation({ mutationFn: (params: AssignDriverParams) => getRepositories().rota.assignDriver(params) });
   const unassignMutation = useMutation({ mutationFn: (params: UnassignDriverParams) => getRepositories().rota.unassignDriver(params) });
@@ -304,9 +311,11 @@ export function ManualRotaPanel({ resortId, weekStart, resortName }: { resortId:
               <InlineNotice tone="info">This rota is published. Manager assignment changes are visible immediately.</InlineNotice>
             )}
             {publish.notice && (
-              <InlineNotice tone={publish.notice.tone} onDismiss={publish.dismissNotice}>
-                {publish.notice.text}
-              </InlineNotice>
+              <div ref={publishNoticeRef} tabIndex={-1} className="manual-rota__publish-notice">
+                <InlineNotice tone={publish.notice.tone} onDismiss={publish.dismissNotice}>
+                  {publish.notice.text}
+                </InlineNotice>
+              </div>
             )}
             {generateNotice && (
               <InlineNotice tone={generateNotice.tone} onDismiss={() => setGenerateNotice(null)}>

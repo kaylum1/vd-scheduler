@@ -636,6 +636,127 @@ describe('Publish Rota: what it changes elsewhere (through the shared repository
   });
 });
 
+describe('Publish Rota: focus after the dialog closes', () => {
+  const noticeRegion = (text: string | RegExp) => screen.getByText(text).closest('.manual-rota__publish-notice') as HTMLElement;
+
+  it('after a successful publish focus moves to the result notice -- not to the now-disabled Published button, not to the page body', async () => {
+    fillDinner();
+    renderRota();
+    await confirmFirst();
+    const notice = await screen.findByText('Rota published. Drivers can now see their assigned shifts.');
+    await waitFor(() => expect(publishButton()).toHaveTextContent('Published'));
+    expect(publishButton()).toBeDisabled();
+    await waitFor(() => expect(document.activeElement).toBe(noticeRegion('Rota published. Drivers can now see their assigned shifts.')));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).not.toBe(publishButton());
+    expect(document.activeElement?.contains(notice)).toBe(true);
+    expect(notice.closest('[role="status"]')).not.toBeNull(); // still announced as a status
+  });
+
+  it('the same holds after "Publish anyway" (an uncovered, warning-toned result)', async () => {
+    renderRota();
+    await confirmAnyway();
+    await screen.findByText(/Rota published\. 2 positions are still uncovered\./);
+    await waitFor(() => expect(document.activeElement).toBe(noticeRegion(/Rota published\. 2 positions/)));
+  });
+
+  it('and after an already-published success', async () => {
+    publishSpy.mockResolvedValueOnce(published({ alreadyPublished: true }));
+    renderRota();
+    await confirmFirst();
+    await screen.findByText('This rota is already published.');
+    await waitFor(() => expect(document.activeElement).toBe(noticeRegion('This rota is already published.')));
+  });
+
+  it('Cancel and Escape (no publication) still return focus to the Publish Rota opener', async () => {
+    renderRota();
+    const d = await openDialog();
+    fireEvent.click(within(d).getByRole('button', { name: 'Cancel' }));
+    expect(publishButton()).toHaveFocus();
+    await openDialog();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(publishButton()).toHaveFocus();
+  });
+
+  it('a FAILED publish leaves focus on the (still enabled) Publish Rota opener so the manager can retry', async () => {
+    publishSpy.mockRejectedValueOnce(new PublishRotaError('unknown', { operation: 'rota.publishRota' }));
+    renderRota();
+    await confirmFirst();
+    await screen.findByRole('alert');
+    expect(publishButton()).toBeEnabled();
+    expect(publishButton()).toHaveFocus();
+  });
+
+  it('focus is not pulled onto a notice for a result that belongs to another selection', async () => {
+    const slow = deferred<PublishRotaResult>();
+    publishSpy.mockReturnValueOnce(slow.promise);
+    fillDinner();
+    const { rerenderWith } = renderRota();
+    await confirmFirst();
+    await waitFor(() => expect(within(dialog()).getByRole('button', { name: 'Publishing…' })).toBeDisabled());
+    rerenderWith({ resortId: CRANS, weekStart: NEXT_WEEK, resortName: 'Crans-Montana' });
+    await screen.findByRole('article', { name: /^Dinner,/ });
+    await act(async () => slow.resolve(published()));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(document.querySelector('.manual-rota__publish-notice')).toBeNull();
+  });
+});
+
+describe('Publish Rota: the whole V1 lifecycle in mock mode', () => {
+  it('Availability -> Generate -> manual edit -> Publish -> driver sees it -> Availability locked -> Auto-Rota blocked -> manual edits still live', async () => {
+    addDriver('mock-pat', 'Pat');
+    answer(dinnerId(WEEK), 'mock-gianni', 'available');
+    answer(dinnerId(WEEK), 'mock-maria', 'available');
+    answer(dinnerId(WEEK), 'mock-pat', 'available');
+    const driverRota = (driverId: string) => new MockRotaRepository().getDriverWeekRota({ weekStart: WEEK, driverId });
+    const availability = new MockAvailabilityRepository();
+
+    // Draft: nothing visible to drivers, Availability still editable.
+    expect(await driverRota('mock-gianni')).toMatchObject({ isPublished: false, shifts: [] });
+    expect((await availability.getWeekAvailabilityStatus('mock-gianni', WEEK)).state).not.toBe('locked');
+
+    renderRota();
+    // Generate Rota (secondary action) fills the open positions.
+    await dinnerCard();
+    await waitFor(() => expect(generateButton()).toBeEnabled());
+    fireEvent.click(generateButton());
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Generate rota?' })).getByRole('button', { name: 'Generate Rota' }));
+    await screen.findByText(/2 assignments added\. All scheduled positions are covered\./);
+
+    // Manual review/edit: swap one generated driver for the third.
+    const generated = mockRotaAssignments.map((a) => a.driverId);
+    const spare = ['mock-gianni', 'mock-maria', 'mock-pat'].find((id) => !generated.includes(id)) as string;
+    const dropped = generated[0];
+    const name = (id: string) => ({ 'mock-gianni': 'Gianni', 'mock-maria': 'Maria', 'mock-pat': 'Pat' })[id] as string;
+    fireEvent.click(within(await dinnerCard()).getByRole('button', { name: `Remove ${name(dropped)} from Dinner` }));
+    await waitFor(async () => expect(within(await dinnerCard()).getByText('1 / 2 active assigned')).toBeInTheDocument());
+    fireEvent.click(within(await dinnerCard()).getByRole('button', { name: /Assign a driver/ }));
+    fireEvent.click(within(await dinnerCard()).getByRole('button', { name: `Assign ${name(spare)} to Dinner` }));
+    await waitFor(async () => expect(within(await dinnerCard()).getByText('2 / 2 active assigned')).toBeInTheDocument());
+
+    // Publish Rota (primary action): covered, so no warning.
+    await confirmFirst();
+    await screen.findByText('Rota published. Drivers can now see their assigned shifts.');
+    await waitFor(() => expect(publishButton()).toHaveTextContent('Published'));
+    expect(generateButton()).toBeDisabled();
+
+    // Driver: Published + exactly their own assignment.
+    const assigned = mockRotaAssignments.map((a) => a.driverId);
+    const unassigned = ['mock-gianni', 'mock-maria', 'mock-pat'].find((id) => !assigned.includes(id)) as string;
+    expect((await driverRota(assigned[0])).isPublished).toBe(true);
+    expect((await driverRota(assigned[0])).shifts).toHaveLength(1);
+    expect(await driverRota(unassigned)).toEqual({ weekStart: WEEK, isPublished: true, shifts: [] });
+
+    // Availability locked; Auto-Rota blocked; manual edits still live for the driver.
+    expect((await availability.getWeekAvailabilityStatus('mock-gianni', WEEK)).state).toBe('locked');
+    expect(isAutoRotaError(await getRepositories().rota.generateAutoRota({ resortId: CRANS, weekStart: WEEK }).catch((e) => e), 'published_week')).toBe(true);
+    fireEvent.click(within(await dinnerCard()).getByRole('button', { name: `Remove ${name(assigned[0])} from Dinner` }));
+    await waitFor(async () => expect(within(await dinnerCard()).getByText('1 / 2 active assigned')).toBeInTheDocument());
+    expect((await driverRota(assigned[0])).shifts).toEqual([]);
+    expect(publishButton()).toHaveTextContent('Published');
+  });
+});
+
 describe('Publish Rota: no unpublish, accessibility and architecture', () => {
   it('43. there is no Unpublish / Retract / Republish / Reopen / Make draft control or wording, draft or published', async () => {
     const pattern = /unpublish|retract|republish|publish again|make draft|reopen rota/i;

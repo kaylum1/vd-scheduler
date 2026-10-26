@@ -33,6 +33,9 @@ export function usePublishRota(resortId: string | null, weekStart: string) {
   const [stage, setStage] = useState<'confirm' | 'uncovered'>('confirm');
   const [uncoveredSlots, setUncoveredSlots] = useState(0);
   const [notice, setNotice] = useState<PublishNotice | null>(null);
+  // Bumped on every SUCCESSFUL result so the panel can move focus to the notice (see ManualRotaPanel): the opener
+  // has just become the disabled "Published" control, so the Modal's own focus restore has nowhere meaningful to go.
+  const [focusRequest, setFocusRequest] = useState(0);
   const [publishingKey, setPublishingKey] = useState<string | null>(null);
   const publishing = publishingKey === selectionKey;
   // Synchronous guard: state flushes after the click handler, a ref does not -- so a second click in the
@@ -89,6 +92,7 @@ export function usePublishRota(resortId: string | null, weekStart: string) {
         setOpen(false);
         setStage('confirm');
         setNotice(describePublishResult(result));
+        setFocusRequest((n) => n + 1);
       }
     } catch (error) {
       if (isPublishRotaConfirmationRequired(error)) {
@@ -117,6 +121,7 @@ export function usePublishRota(resortId: string | null, weekStart: string) {
     stage,
     uncoveredSlots,
     notice,
+    focusRequest,
     publishing,
     openDialog,
     cancel,

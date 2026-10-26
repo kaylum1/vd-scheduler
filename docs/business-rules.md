@@ -1254,12 +1254,24 @@ shifts on one day.
 - The availability read is bounded by the API's 1000-row cap (shifts × drivers).
 
 
-## S. Publish Rota — database, repository and manager UI (PB-A, PB-B, PB-C)
+## S. Publish Rota V1 — IMPLEMENTED / COMPLETE (PB-A → PB-D)
 
-**Status: PB-C (the manager Publish UI) is implemented; final verification and the
-HANDOFF refresh are PB-D, so Publish Rota is not yet declared complete.** The
-authoritative database RPC (PB-A), the repository / error contract / mock provider
-(PB-B) and the Manual Rota Publish control (PB-C, below) are built and tested.
+**Status: Publish Rota V1 is IMPLEMENTED and COMPLETE.** The authoritative database
+RPC (PB-A), the repository / error contract / mock provider (PB-B), the Manual Rota
+Publish control (PB-C) and the final end-to-end verification (PB-D, below) are done
+and green. The scheduling lifecycle is now: Resort & Shift Setup → Driver
+Availability → Auto-Rota → Manual Rota review/edit → **Publish Rota** → Driver My Rota.
+
+**V1 in one place:** publish-only (no unpublish / retract / make-draft, no
+notifications, no auto-publish, no versions or snapshots); uncovered positions are
+allowed but need an explicit, server-recounted acknowledgement; a week with zero
+assignments is publishable the same way; a week with no active shift is not; a wholly
+past week (or one whose every active shift is before today) is not, while a partially
+historical week and "today" are; an inactive resort is refused; already published is
+an idempotent success; drivers see the live assignments (no snapshot), so manager
+edits after publishing show on their next refetch; Availability is locked and
+Auto-Rota is blocked by the publication row itself; `generation_source` is derived by
+the server and never shown in the UI.
 
 **What publishing means.** One deliberate, server-validated act per resort +
 Monday–Sunday week that (a) makes the week's assigned shifts visible to drivers,
@@ -1363,5 +1375,31 @@ and share one row.
   available** (today and future shifts, per the existing rules), a manual edit never
   unpublishes the week, and drivers see it on their next refetch without republishing.
 
-**Not built yet (PB-D):** the final end-to-end Publish verification and the HANDOFF
-rewrite.
+**Focus after publishing (PB-D fix).** A successful publish turns the opener into the
+disabled "Published" control, so the shared Modal's focus restore would drop focus to
+the page body. After any successful result (published, published with uncovered
+positions, already published) focus now moves to the result notice (a programmatically
+focusable status region); Cancel, Escape and a failed publish still return focus to
+the Publish Rota opener. The shared Modal itself is unchanged.
+
+**PB-D verification (real local Supabase, real logins; scratch fixtures, nothing
+committed).** Verified: the full Availability → Generate → manual edit → Publish →
+Driver My Rota workflow through the UI (Availability locked, answers unchanged);
+covered, uncovered (plural and singular), zero-assignment, zero-shift, wholly past,
+partially historical, today, inactive-resort and already-published cases; the count
+changing between the warning and the confirmation in both directions (the confirmed
+call and its audit row use the current count, no third prompt); republish of a
+retracted row (same row, `published_by` and `published_at` refreshed,
+`generation_source` recomputed); `generation_source` auto / manual / zero-assignment;
+driver visibility (own shifts, unassigned driver Published + empty, other-resort
+driver nothing, no co-driver identity); post-publish assign / unassign visible to the
+driver on refetch with the publication row and its audit untouched; Auto-Rota
+blocked (`published_week`, nothing created); direct manager INSERT / UPDATE / DELETE
+refused (`42501`), driver and anon refused; five two-connection races (Auto-Rota
+first → Publish waits and publishes the finished draft; Publish first → Auto-Rota
+refused; manual assign / unassign first → Publish reads the fresh coverage, asking for
+confirmation with the fresh count when a gap appeared; two managers publishing → one
+row, one audit insert, the second an idempotent success); audit contexts correct, not
+leaking onto other tables or later writes; mock mode and 375px mobile (actions row,
+disabled reasons, both dialogs, pending state, warning notice, published cards, no
+horizontal overflow); keyboard operation, focus trap, Escape, focus return.
